@@ -4,7 +4,7 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.text}>
-        hello world, <Text style={styles.bold}>Huber</Text>
+        hello world, Keziah <Text style={styles.bold}>Huber</Text>
       </Text>
     </View>
   );
