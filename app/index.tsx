@@ -5,6 +5,7 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <Text style={styles.text}>
         hello world, Ari <Text style={styles.bold}>Huber</Text>
+        hello world, Ari <Text style={styles.bold}>Huber</Text>
       </Text>
     </View>
   );
