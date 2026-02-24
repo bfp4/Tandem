@@ -1,12 +1,25 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect } from 'react';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../context/AuthContext';
 
-export default function HomeScreen() {
+export default function Index() {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading) {
+      if (user) {
+        router.replace('./home' as any);
+      } else {
+        router.replace('./login' as any);
+      }
+    }
+  }, [user, loading]);
+
   return (
     <View style={styles.container}>
-      <Text style={styles.text}>
-        hello world, Ari<Text style={styles.bold}>Huber</Text>
-        hello world, Sophia<Text style={styles.bold}>Huber</Text>
-      </Text>
+      <ActivityIndicator size="large" color="#007AFF" />
     </View>
   );
 }
@@ -16,12 +29,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  text: {
-    fontSize: 20,
-  },
-  bold: {
-    fontWeight: 'bold',
+    backgroundColor: '#f5f5f5',
   },
 });
