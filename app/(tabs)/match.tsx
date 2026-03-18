@@ -166,7 +166,7 @@ export default function MatchScreen() {
           <Ionicons name="search" size={20} color="#989" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search by name..."
+            placeholder="Search for a person..."
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholderTextColor="#999"
