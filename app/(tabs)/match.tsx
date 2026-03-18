@@ -9,7 +9,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 
 interface Match {
@@ -163,7 +163,7 @@ export default function MatchScreen() {
 
       <View style={styles.searchSection}>
         <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color="#999" />
+          <Ionicons name="search" size={20} color="#989" />
           <TextInput
             style={styles.searchInput}
             placeholder="Search for a person..."
