@@ -14,6 +14,7 @@ import { db } from '@/config/firebase';
 import type { RideRequest } from '@/types/rideRequest';
 import type { ScheduleBlock } from '@/types/scheduleBlock';
 import type { RideConfirmation } from '@/types/rideConfirmation';
+import type { User } from '@/types/user';
 import { splitBlock } from './scheduleBlockService';
 import { createNotification } from './notificationService';
 
@@ -202,4 +203,34 @@ export async function getRideRequestsForRider(
     query(collection(db, 'rideRequests'), ...constraints),
   );
   return snap.docs.map((d) => d.data() as RideRequest);
+}
+
+export async function getAssociatedDriversForRider(riderId: string): Promise<User[]> {
+  const snap = await getDocs(
+    query(
+      collection(db, 'rideRequests'),
+      where('riderId', '==', riderId),
+      where('status', '==', 'confirmed'),
+    ),
+  );
+  const driverIds = [...new Set(snap.docs.map((d) => (d.data() as RideRequest).driverId))];
+  const results = await Promise.all(
+    driverIds.map((id) => getDoc(doc(db, 'users', id))),
+  );
+  return results.filter((s) => s.exists()).map((s) => s.data() as User);
+}
+
+export async function getAssociatedRidersForDriver(driverId: string): Promise<User[]> {
+  const snap = await getDocs(
+    query(
+      collection(db, 'rideRequests'),
+      where('driverId', '==', driverId),
+      where('status', '==', 'confirmed'),
+    ),
+  );
+  const riderIds = [...new Set(snap.docs.map((d) => (d.data() as RideRequest).riderId))];
+  const results = await Promise.all(
+    riderIds.map((id) => getDoc(doc(db, 'users', id))),
+  );
+  return results.filter((s) => s.exists()).map((s) => s.data() as User);
 }

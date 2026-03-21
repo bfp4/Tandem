@@ -23,15 +23,14 @@ export async function createScheduleBlock(
   return ref.id;
 }
 
-export async function getOpenBlocksForDriver(
-  driverId: string,
+export async function getBlocksByUser(
+  userId: string,
+  options?: { role?: 'driver' | 'rider'; status?: ScheduleBlock['status'] },
 ): Promise<ScheduleBlock[]> {
-  const q = query(
-    collection(db, 'scheduleBlocks'),
-    where('userId', '==', driverId),
-    where('status', '==', 'open'),
-  );
-  const snap = await getDocs(q);
+  const constraints = [where('userId', '==', userId)];
+  if (options?.role) constraints.push(where('role', '==', options.role));
+  if (options?.status) constraints.push(where('status', '==', options.status));
+  const snap = await getDocs(query(collection(db, 'scheduleBlocks'), ...constraints));
   return snap.docs.map((d) => d.data() as ScheduleBlock);
 }
 
