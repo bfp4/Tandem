@@ -11,11 +11,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-} from 'firebase/auth';
-import { auth } from '../config/firebase';
+import { signInWithEmail, signUpWithEmail } from '../services/authService';
 import { useRouter } from 'expo-router';
 
 export default function LoginScreen() {
@@ -34,9 +30,9 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        await signInWithEmail(email, password);
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
+        await signUpWithEmail(email, password);
       }
       router.replace('./home' as any);
     } catch (error: any) {
