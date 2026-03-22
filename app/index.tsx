@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useEffect } from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
 export default function Index() {
@@ -9,11 +9,12 @@ export default function Index() {
 
   useEffect(() => {
     if (!loading) {
-      if (user) {
-        router.replace('/(tabs)/home' as any);
-      } else {
-        router.replace('./login' as any);
-      }
+      router.replace('./(tabs)/home' as any);
+      // if (user) {
+      //   router.replace('/(tabs)/home' as any);
+      // } else {
+      //   router.replace('./login' as any);
+      // }
     }
   }, [user, loading]);
 

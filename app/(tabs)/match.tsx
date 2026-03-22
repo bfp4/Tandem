@@ -15,11 +15,12 @@ import {
 interface Match {
   id: string;
   name: string;
-  distance: string;
+  distance: number;
   rating: number;
   totalRides: number;
   driverType: 'Quiet' | 'Talkative' | 'Friendly' | 'Professional';
   bio: string;
+  matchPercentage: number;
 }
 
 export default function MatchScreen() {
@@ -44,49 +45,60 @@ export default function MatchScreen() {
       { 
         id: '1', 
         name: 'Alex Johnson', 
-        distance: '0.5 mi', 
+        distance: 0.5, 
         rating: 4.9, 
         totalRides: 234,
         driverType: 'Quiet',
-        bio: 'Prefer peaceful rides with minimal conversation. Always on time and professional.'
+        bio: 'Prefer peaceful rides with minimal conversation. Always on time and professional.',
+        matchPercentage: 0
       },
       { 
         id: '2', 
         name: 'Sam Martinez', 
-        distance: '1.2 mi', 
+        distance: 1.2, 
         rating: 4.7, 
         totalRides: 156,
         driverType: 'Talkative',
-        bio: 'Love chatting and making new friends! Great music playlist and always friendly.'
+        bio: 'Love chatting and making new friends! Great music playlist and always friendly.',
+        matchPercentage: 0
       },
       { 
         id: '3', 
         name: 'Jordan Lee', 
-        distance: '2.1 mi', 
+        distance: 2.1, 
         rating: 4.8, 
         totalRides: 189,
         driverType: 'Professional',
-        bio: 'Experienced driver with focus on safety and comfort. Clean car, smooth rides.'
+        bio: 'Experienced driver with focus on safety and comfort. Clean car, smooth rides.',
+        matchPercentage: 0
       },
       { 
         id: '4', 
         name: 'Taylor Smith', 
-        distance: '0.8 mi', 
+        distance: 0.8, 
         rating: 5.0, 
         totalRides: 312,
         driverType: 'Friendly',
-        bio: 'Happy to help with luggage and flexible with stops. 5+ years of driving experience.'
+        bio: 'Happy to help with luggage and flexible with stops. 5+ years of driving experience.',
+        matchPercentage: 0
       },
     ];
     setMatches(sampleMatches);
   };
+//Implement the following function. Also figure out how to make an object for schedules
+  const calculateMatchPercentage = (match: Match) => {
+      var toReturn = 50 * 1/match.distance;
+      if(toReturn > 50) toReturn = 50;
+      toReturn += 50 * (match.rating/5);
+  }
 
   const applyFilters = () => {
     let filtered = [...matches];
 
     if (searchQuery) {
       filtered = filtered.filter(match => 
-        match.name.toLowerCase().includes(searchQuery.toLowerCase())
+        match.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        match.driverType.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
@@ -163,10 +175,10 @@ export default function MatchScreen() {
 
       <View style={styles.searchSection}>
         <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color="#989" />
+          <Ionicons name="search" size={20} color="#999" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search for a person..."
+            placeholder="Search for a driver..."
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholderTextColor="#999"
