@@ -480,7 +480,7 @@ export default function HomeScreen() {
       {/* Mode Label */}
       <View style={styles.modeLabel}>
         <View style={[styles.modeDot, { backgroundColor: isActive ? '#34D399' : '#6366F1' }]}>
-          <Text style={styles.modeLabelText}>{isActive ? 'Active Ride' : 'No currrent ride'}</Text>
+          <Text style={styles.modeLabelText}>{isActive ? 'AR' : 'NR'}</Text>
         </View>
       </View>
 
