@@ -1,19 +1,20 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
+  Alert,
+  ScrollView,
   StyleSheet,
   Text,
-  View,
-  ScrollView,
   TouchableOpacity,
-  Alert,
+  View,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 
 interface TimeSlot {
   day: string;
   time: string;
   available: boolean;
+  requested: boolean;
 }
 
 export default function DriverDetailsScreen() {
@@ -31,65 +32,66 @@ export default function DriverDetailsScreen() {
   const timeSlots = ['8:00 AM', '10:00 AM', '12:00 PM', '2:00 PM', '4:00 PM', '6:00 PM'];
 
   const [schedule] = useState<TimeSlot[]>([
-    { day: 'Mon', time: '8:00 AM', available: true },
-    { day: 'Mon', time: '10:00 AM', available: false },
-    { day: 'Mon', time: '12:00 PM', available: true },
-    { day: 'Mon', time: '2:00 PM', available: true },
-    { day: 'Mon', time: '4:00 PM', available: false },
-    { day: 'Mon', time: '6:00 PM', available: true },
+    { day: 'Mon', time: '8:00 AM', available: true, requested: false },
+    { day: 'Mon', time: '10:00 AM', available: false, requested: false },
+    { day: 'Mon', time: '12:00 PM', available: true, requested: false },
+    { day: 'Mon', time: '2:00 PM', available: true, requested: false },
+    { day: 'Mon', time: '4:00 PM', available: false, requested: false },
+    { day: 'Mon', time: '6:00 PM', available: true, requested: false },
     
-    { day: 'Tue', time: '8:00 AM', available: true },
-    { day: 'Tue', time: '10:00 AM', available: true },
-    { day: 'Tue', time: '12:00 PM', available: false },
-    { day: 'Tue', time: '2:00 PM', available: true },
-    { day: 'Tue', time: '4:00 PM', available: true },
-    { day: 'Tue', time: '6:00 PM', available: false },
+    { day: 'Tue', time: '8:00 AM', available: true, requested: false },
+    { day: 'Tue', time: '10:00 AM', available: true, requested: false },
+    { day: 'Tue', time: '12:00 PM', available: false, requested: false },
+    { day: 'Tue', time: '2:00 PM', available: true, requested: false },
+    { day: 'Tue', time: '4:00 PM', available: true, requested: false },
+    { day: 'Tue', time: '6:00 PM', available: false, requested: false },
     
-    { day: 'Wed', time: '8:00 AM', available: false },
-    { day: 'Wed', time: '10:00 AM', available: true },
-    { day: 'Wed', time: '12:00 PM', available: true },
-    { day: 'Wed', time: '2:00 PM', available: true },
-    { day: 'Wed', time: '4:00 PM', available: true },
-    { day: 'Wed', time: '6:00 PM', available: true },
+    { day: 'Wed', time: '8:00 AM', available: false, requested: false },
+    { day: 'Wed', time: '10:00 AM', available: true, requested: false },
+    { day: 'Wed', time: '12:00 PM', available: true, requested: false },
+    { day: 'Wed', time: '2:00 PM', available: true, requested: false },
+    { day: 'Wed', time: '4:00 PM', available: true, requested: false },
+    { day: 'Wed', time: '6:00 PM', available: true, requested: false },
     
-    { day: 'Thu', time: '8:00 AM', available: true },
-    { day: 'Thu', time: '10:00 AM', available: false },
-    { day: 'Thu', time: '12:00 PM', available: true },
-    { day: 'Thu', time: '2:00 PM', available: false },
-    { day: 'Thu', time: '4:00 PM', available: true },
-    { day: 'Thu', time: '6:00 PM', available: true },
+    { day: 'Thu', time: '8:00 AM', available: true, requested: false },
+    { day: 'Thu', time: '10:00 AM', available: false, requested: false },
+    { day: 'Thu', time: '12:00 PM', available: true, requested: false },
+    { day: 'Thu', time: '2:00 PM', available: false, requested: false },
+    { day: 'Thu', time: '4:00 PM', available: true, requested: false },
+    { day: 'Thu', time: '6:00 PM', available: true, requested: false },
     
-    { day: 'Fri', time: '8:00 AM', available: true },
-    { day: 'Fri', time: '10:00 AM', available: true },
-    { day: 'Fri', time: '12:00 PM', available: true },
-    { day: 'Fri', time: '2:00 PM', available: true },
-    { day: 'Fri', time: '4:00 PM', available: false },
-    { day: 'Fri', time: '6:00 PM', available: false },
+    { day: 'Fri', time: '8:00 AM', available: true, requested: false },
+    { day: 'Fri', time: '10:00 AM', available: true, requested: false },
+    { day: 'Fri', time: '12:00 PM', available: true, requested: false },
+    { day: 'Fri', time: '2:00 PM', available: true, requested: false },
+    { day: 'Fri', time: '4:00 PM', available: false, requested: false },
+    { day: 'Fri', time: '6:00 PM', available: false, requested: false },
     
-    { day: 'Sat', time: '8:00 AM', available: false },
-    { day: 'Sat', time: '10:00 AM', available: true },
-    { day: 'Sat', time: '12:00 PM', available: true },
-    { day: 'Sat', time: '2:00 PM', available: true },
-    { day: 'Sat', time: '4:00 PM', available: true },
-    { day: 'Sat', time: '6:00 PM', available: true },
+    { day: 'Sat', time: '8:00 AM', available: false, requested: false },
+    { day: 'Sat', time: '10:00 AM', available: true, requested: false },
+    { day: 'Sat', time: '12:00 PM', available: true, requested: false },
+    { day: 'Sat', time: '2:00 PM', available: true, requested: false },
+    { day: 'Sat', time: '4:00 PM', available: true, requested: false },
+    { day: 'Sat', time: '6:00 PM', available: true, requested: false },
     
-    { day: 'Sun', time: '8:00 AM', available: true },
-    { day: 'Sun', time: '10:00 AM', available: false },
-    { day: 'Sun', time: '12:00 PM', available: false },
-    { day: 'Sun', time: '2:00 PM', available: true },
-    { day: 'Sun', time: '4:00 PM', available: true },
-    { day: 'Sun', time: '6:00 PM', available: true },
+    { day: 'Sun', time: '8:00 AM', available: true, requested: false },
+    { day: 'Sun', time: '10:00 AM', available: false, requested: false },
+    { day: 'Sun', time: '12:00 PM', available: false, requested: false },
+    { day: 'Sun', time: '2:00 PM', available: true, requested: false },
+    { day: 'Sun', time: '4:00 PM', available: true, requested: false },
+    { day: 'Sun', time: '6:00 PM', available: true, requested: false },
   ]);
 
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
 
   const handleSlotPress = (slot: TimeSlot) => {
-    if (!slot.available) {
+    if (!slot.available || slot.requested) {
       Alert.alert('Unavailable', 'This time slot is not available');
       return;
     }
 
     setSelectedSlot(slot);
+    slot.requested = true;
     Alert.alert(
       'Request Ride',
       `Request a ride with ${driverName} on ${slot.day} at ${slot.time}?`,
@@ -98,6 +100,8 @@ export default function DriverDetailsScreen() {
         {
           text: 'Request',
           onPress: () => {
+            setSelectedSlot(slot)
+            slot.requested = true;
             Alert.alert('Success', `Ride requested for ${slot.day} at ${slot.time}`);
           }
         }
@@ -180,12 +184,16 @@ export default function DriverDetailsScreen() {
                         style={[
                           styles.slotCell,
                           slot?.available ? styles.slotAvailable : styles.slotUnavailable,
-                          selectedSlot?.day === day && selectedSlot?.time === time && styles.slotSelected
+                          selectedSlot?.day === day && selectedSlot?.time === time && styles.slotSelected,
+                          slot?.requested && styles.slotRequested
                         ]}
                         onPress={() => slot && handleSlotPress(slot)}
+                        
                       >
-                        {slot?.available ? (
+                        {slot?.available && !slot.requested ? (
                           <Ionicons name="checkmark" size={20} color="#34C759" />
+                        ) : slot?.requested ? (
+                          <Ionicons name="hourglass" size={20} color="#FF9800" />
                         ) : (
                           <Ionicons name="close" size={20} color="#ccc" />
                         )}
@@ -205,6 +213,10 @@ export default function DriverDetailsScreen() {
             <View style={styles.legendItem}>
               <View style={[styles.legendBox, styles.legendUnavailable]} />
               <Text style={styles.legendText}>Unavailable</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendBox, styles.legendRequested]} />
+              <Text style={styles.legendText}>Requested</Text>
             </View>
           </View>
         </View>
@@ -378,8 +390,12 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0',
   },
   slotSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+    backgroundColor: '#FFF3E0',
+    borderColor: '#FF9800',
+  },
+  slotRequested: {
+    backgroundColor: '#FFF3E0',
+    borderColor: '#FF9800',
   },
   legend: {
     flexDirection: 'row',
@@ -405,6 +421,10 @@ const styles = StyleSheet.create({
   legendUnavailable: {
     backgroundColor: '#f5f5f5',
     borderColor: '#e0e0e0',
+  },
+  legendRequested: {
+    backgroundColor: '#FFF3E0',
+    borderColor: '#FF9800',
   },
   legendText: {
     fontSize: 14,
