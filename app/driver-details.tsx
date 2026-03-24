@@ -313,7 +313,7 @@ export default function DriverDetailsScreen() {
                   </TouchableOpacity>
                 </View>
 
-                <Text style={styles.sideInputLabel}>Puckup location</Text>
+                <Text style={styles.sideInputLabel}>Pickup location</Text>
                 <TextInput
                   style={styles.sideTextInput}
                   placeholder="Insert pickup location"

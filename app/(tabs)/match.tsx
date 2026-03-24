@@ -27,7 +27,7 @@ interface Match {
 
 export default function MatchScreen() {
   const router = useRouter();
-  const { user: authUser } = useAuth();
+  // const { user: authUser } = useAuth();
   const [matches, setMatches] = useState<Match[]>([]);
   const [filteredMatches, setFilteredMatches] = useState<Match[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -41,7 +41,7 @@ export default function MatchScreen() {
 
   useEffect(() => {
     loadMatches();
-  }, [loadMatches]);
+  }, []);
 
   useEffect(() => {
     applyFilters();
