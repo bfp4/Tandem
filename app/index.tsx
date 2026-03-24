@@ -9,11 +9,12 @@ export default function Index() {
 
   useEffect(() => {
     if (!loading) {
-      if (user) {
-        router.replace('/(tabs)/home' as any);
-      } else {
-        router.replace('./login' as any);
-      }
+      router.replace('./(tabs)/home' as any);
+      // if (user) {
+      //   router.replace('/(tabs)/home' as any);
+      // } else {
+      //   router.replace('./login' as any);
+      // }
     }
   }, [user, loading]);
 

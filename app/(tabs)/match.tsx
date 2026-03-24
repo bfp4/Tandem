@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { distanceBetween } from 'geofire-common';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   FlatList,
   Modal,
@@ -12,6 +13,10 @@ import {
   View,
 } from 'react-native';
 
+import { useAuth } from '@/context/AuthContext';
+import { getAllDriversWithIds, getUser } from '@/services/userService';
+import type { User } from '@/types/user';
+
 interface Match {
   id: string;
   name: string;
@@ -22,8 +27,56 @@ interface Match {
   bio: string;
 }
 
+const KM_PER_MILE = 1.60934;
+
+type UserWithExtras = User & {
+  lat?: number;
+  lng?: number;
+  driverType?: string;
+};
+
+function mapUserToMatch(
+  id: string,
+  user: UserWithExtras,
+  viewer?: { lat: number; lng: number },
+): Match {
+  let distance = '—';
+  if (
+    viewer !== undefined &&
+    user.lat !== undefined &&
+    user.lng !== undefined
+  ) {
+    const km = distanceBetween([user.lat, user.lng], [viewer.lat, viewer.lng]);
+    const mi = km / KM_PER_MILE;
+    distance = `${mi.toFixed(1)} mi`;
+  }
+
+  const types: Match['driverType'][] = [
+    'Quiet',
+    'Talkative',
+    'Friendly',
+    'Professional',
+  ];
+  const rawType = user.driverType;
+  const driverType =
+    rawType && types.includes(rawType as Match['driverType'])
+      ? (rawType as Match['driverType'])
+      : 'Friendly';
+
+  return {
+    id,
+    name: user.name?.trim() || user.username || 'Driver',
+    distance,
+    rating: user.starRating ?? 0,
+    totalRides: user.rideCount ?? 0,
+    driverType,
+    bio: user.bio?.trim() ?? '',
+  };
+}
+
 export default function MatchScreen() {
   const router = useRouter();
+  const { user: authUser } = useAuth();
   const [matches, setMatches] = useState<Match[]>([]);
   const [filteredMatches, setFilteredMatches] = useState<Match[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,55 +84,40 @@ export default function MatchScreen() {
   const [selectedRating, setSelectedRating] = useState<number | null>(null);
   const [selectedDriverType, setSelectedDriverType] = useState<string | null>(null);
 
+  const loadMatches = useCallback(async () => {
+    try {
+      const rows = await getAllDriversWithIds();
+      let viewer: { lat: number; lng: number } | undefined;
+      if (authUser?.uid) {
+        try {
+          const me = (await getUser(authUser.uid)) as UserWithExtras;
+          if (me.lat !== undefined && me.lng !== undefined) {
+            viewer = { lat: me.lat, lng: me.lng };
+          }
+        } catch {
+          // viewer profile missing or offline
+        }
+      }
+
+      const next: Match[] = rows
+        .filter((row) => row.id !== authUser?.uid)
+        .map((row) => mapUserToMatch(row.id, row.data as UserWithExtras, viewer))
+        .sort((a, b) => b.rating - a.rating);
+
+      setMatches(next);
+    } catch (e) {
+      console.error('loadMatches', e);
+      setMatches([]);
+    }
+  }, [authUser?.uid]);
+
   useEffect(() => {
     loadMatches();
-  }, []);
+  }, [loadMatches]);
 
   useEffect(() => {
     applyFilters();
   }, [searchQuery, selectedRating, selectedDriverType, matches]);
-
-  const loadMatches = async () => {
-    const sampleMatches: Match[] = [
-      { 
-        id: '1', 
-        name: 'Alex Johnson', 
-        distance: '0.5 mi', 
-        rating: 4.9, 
-        totalRides: 234,
-        driverType: 'Quiet',
-        bio: 'Prefer peaceful rides with minimal conversation. Always on time and professional.'
-      },
-      { 
-        id: '2', 
-        name: 'Sam Martinez', 
-        distance: '1.2 mi', 
-        rating: 4.7, 
-        totalRides: 156,
-        driverType: 'Talkative',
-        bio: 'Love chatting and making new friends! Great music playlist and always friendly.'
-      },
-      { 
-        id: '3', 
-        name: 'Jordan Lee', 
-        distance: '2.1 mi', 
-        rating: 4.8, 
-        totalRides: 189,
-        driverType: 'Professional',
-        bio: 'Experienced driver with focus on safety and comfort. Clean car, smooth rides.'
-      },
-      { 
-        id: '4', 
-        name: 'Taylor Smith', 
-        distance: '0.8 mi', 
-        rating: 5.0, 
-        totalRides: 312,
-        driverType: 'Friendly',
-        bio: 'Happy to help with luggage and flexible with stops. 5+ years of driving experience.'
-      },
-    ];
-    setMatches(sampleMatches);
-  };
 
   const applyFilters = () => {
     let filtered = [...matches];

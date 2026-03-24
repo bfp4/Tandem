@@ -1,22 +1,22 @@
-import {
-  collection,
-  doc,
-  addDoc,
-  getDoc,
-  getDocs,
-  updateDoc,
-  query,
-  where,
-  runTransaction,
-  serverTimestamp,
-} from 'firebase/firestore';
 import { db } from '@/config/firebase';
+import type { RideConfirmation } from '@/types/rideConfirmation';
 import type { RideRequest } from '@/types/rideRequest';
 import type { ScheduleBlock } from '@/types/scheduleBlock';
-import type { RideConfirmation } from '@/types/rideConfirmation';
 import type { User } from '@/types/user';
-import { splitBlock } from './scheduleBlockService';
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  runTransaction,
+  serverTimestamp,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 import { createNotification } from './notificationService';
+import { splitBlock } from './scheduleBlockService';
 
 type CreateRideRequestData = Omit<
   RideRequest,

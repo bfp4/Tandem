@@ -1,16 +1,16 @@
-import {
-  doc,
-  getDoc,
-  updateDoc,
-  collection,
-  getDocs,
-  query,
-  where,
-} from 'firebase/firestore';
-import { geohashQueryBounds, distanceBetween } from 'geofire-common';
 import { db } from '@/config/firebase';
-import type { User } from '@/types/user';
 import type { HistoryBlock } from '@/types/historyBlock';
+import type { User } from '@/types/user';
+import {
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    updateDoc,
+    where,
+} from 'firebase/firestore';
+import { distanceBetween, geohashQueryBounds } from 'geofire-common';
 
 export interface UserFilters {
   minRating?: number;
@@ -76,7 +76,7 @@ const MILES_TO_KM = 1.60934;
 async function applyPostQueryFilters(
   users: { id: string; data: User }[],
   filters?: Pick<UserFilters, 'minRating' | 'availableOn'>,
-): Promise<User[]> {
+): Promise<{ id: string; data: User }[]> {
   let results = users;
 
   if (filters?.minRating !== undefined) {
@@ -103,13 +103,13 @@ async function applyPostQueryFilters(
     results = available.filter((u): u is { id: string; data: User } => u !== null);
   }
 
-  return results.map((u) => u.data);
+  return results;
 }
 
 async function getUsersByRole(
   role: 'driver' | 'rider',
   filters?: UserFilters,
-): Promise<User[]> {
+): Promise<{ id: string; data: User }[]> {
   let candidates: { id: string; data: User }[];
 
   if (filters?.location) {
@@ -162,9 +162,18 @@ async function getUsersByRole(
 }
 
 export async function getAllDrivers(filters?: UserFilters): Promise<User[]> {
+  const rows = await getUsersByRole('driver', filters);
+  return rows.map((r) => r.data);
+}
+
+/** Same as getAllDrivers but keeps Firestore document id (Auth uid). */
+export async function getAllDriversWithIds(
+  filters?: UserFilters,
+): Promise<{ id: string; data: User }[]> {
   return getUsersByRole('driver', filters);
 }
 
 export async function getAllRiders(filters?: UserFilters): Promise<User[]> {
-  return getUsersByRole('rider', filters);
+  const rows = await getUsersByRole('rider', filters);
+  return rows.map((r) => r.data);
 }
