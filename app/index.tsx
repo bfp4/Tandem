@@ -1,6 +1,8 @@
 import { useRouter } from 'expo-router';
+import { doc, getDoc } from 'firebase/firestore';
 import React, { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
 
 export default function Index() {
@@ -8,14 +10,30 @@ export default function Index() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading) {
-      router.replace('./(tabs)/home' as any);
-      // if (user) {
-      //   router.replace('/(tabs)/home' as any);
-      // } else {
-      //   router.replace('./login' as any);
-      // }
+    if (loading) return;
+
+    if (!user) {
+      router.replace('./login' as any);
+      return;
     }
+
+    // Check if the user has completed their profile
+    const checkProfile = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        if (!snap.exists() || !snap.data()?.username) {
+          // No profile doc yet — route to details flow
+          router.replace('/signup/details' as any);
+        } else {
+          router.replace('/(tabs)/home' as any);
+        }
+      } catch {
+        // If we can't fetch, send to details to be safe
+        router.replace('/signup/details' as any);
+      }
+    };
+
+    checkProfile();
   }, [user, loading]);
 
   return (
@@ -30,6 +48,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#fff',
   },
 });
