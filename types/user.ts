@@ -44,4 +44,6 @@ export interface User {
     /** URL to Firebase Storage */
     photo: string;
   } | null;
+
+  uid: string;
 }

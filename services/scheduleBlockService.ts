@@ -1,15 +1,15 @@
 import { db } from '@/config/firebase';
 import type { ScheduleBlock } from '@/types/scheduleBlock';
 import {
-    addDoc,
-    collection,
-    doc,
-    getDocs,
-    query,
-    serverTimestamp,
-    Transaction,
-    updateDoc,
-    where
+  addDoc,
+  collection,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  Transaction,
+  updateDoc,
+  where
 } from 'firebase/firestore';
 
 export async function createScheduleBlock(

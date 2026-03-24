@@ -1,7 +1,9 @@
+import { signUpWithEmail } from '@/services/authService';
+import { getAllDrivers } from '@/services/userService';
+import { User } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { distanceBetween } from 'geofire-common';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   FlatList,
   Modal,
@@ -10,68 +12,17 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
-
-import { useAuth } from '@/context/AuthContext';
-import { getAllDriversWithIds, getUser } from '@/services/userService';
-import type { User } from '@/types/user';
 
 interface Match {
   id: string;
   name: string;
-  distance: string;
+  distance: number;
   rating: number;
   totalRides: number;
-  driverType: 'Quiet' | 'Talkative' | 'Friendly' | 'Professional';
+  driverType: string;
   bio: string;
-}
-
-const KM_PER_MILE = 1.60934;
-
-type UserWithExtras = User & {
-  lat?: number;
-  lng?: number;
-  driverType?: string;
-};
-
-function mapUserToMatch(
-  id: string,
-  user: UserWithExtras,
-  viewer?: { lat: number; lng: number },
-): Match {
-  let distance = '—';
-  if (
-    viewer !== undefined &&
-    user.lat !== undefined &&
-    user.lng !== undefined
-  ) {
-    const km = distanceBetween([user.lat, user.lng], [viewer.lat, viewer.lng]);
-    const mi = km / KM_PER_MILE;
-    distance = `${mi.toFixed(1)} mi`;
-  }
-
-  const types: Match['driverType'][] = [
-    'Quiet',
-    'Talkative',
-    'Friendly',
-    'Professional',
-  ];
-  const rawType = user.driverType;
-  const driverType =
-    rawType && types.includes(rawType as Match['driverType'])
-      ? (rawType as Match['driverType'])
-      : 'Friendly';
-
-  return {
-    id,
-    name: user.name?.trim() || user.username || 'Driver',
-    distance,
-    rating: user.starRating ?? 0,
-    totalRides: user.rideCount ?? 0,
-    driverType,
-    bio: user.bio?.trim() ?? '',
-  };
 }
 
 export default function MatchScreen() {
@@ -84,32 +35,9 @@ export default function MatchScreen() {
   const [selectedRating, setSelectedRating] = useState<number | null>(null);
   const [selectedDriverType, setSelectedDriverType] = useState<string | null>(null);
 
-  const loadMatches = useCallback(async () => {
-    try {
-      const rows = await getAllDriversWithIds();
-      let viewer: { lat: number; lng: number } | undefined;
-      if (authUser?.uid) {
-        try {
-          const me = (await getUser(authUser.uid)) as UserWithExtras;
-          if (me.lat !== undefined && me.lng !== undefined) {
-            viewer = { lat: me.lat, lng: me.lng };
-          }
-        } catch {
-          // viewer profile missing or offline
-        }
-      }
-
-      const next: Match[] = rows
-        .filter((row) => row.id !== authUser?.uid)
-        .map((row) => mapUserToMatch(row.id, row.data as UserWithExtras, viewer))
-        .sort((a, b) => b.rating - a.rating);
-
-      setMatches(next);
-    } catch (e) {
-      console.error('loadMatches', e);
-      setMatches([]);
-    }
-  }, [authUser?.uid]);
+  const makeUsers = () => {
+      signUpWithEmail('example@email.com', 'examplePassowrd');
+  }
 
   useEffect(() => {
     loadMatches();
@@ -119,12 +47,36 @@ export default function MatchScreen() {
     applyFilters();
   }, [searchQuery, selectedRating, selectedDriverType, matches]);
 
+  const driverTypes = ['Quiet', 'Talkitive', 'Friendly', 'Professional'];
+
+  const loadMatches = async () => {
+    makeUsers;
+    const data = await getAllDrivers();
+    let sampleMatches: Match[] = [];
+    (data).forEach((element: User) => {
+        const elementData = {
+          id: element.uid,
+          name: element.name,
+          rating: element.starRating,
+          driverType: driverTypes[Math.floor((Math.random() * 100)%4)],
+          distance: 0,
+          totalRides: element.rideCount,
+          bio: element.bio
+        }
+        sampleMatches.push(elementData);
+      })
+      sampleMatches.sort((a, b) => b.rating - a.rating);
+    setMatches(sampleMatches);
+  }
+
   const applyFilters = () => {
     let filtered = [...matches];
 
     if (searchQuery) {
       filtered = filtered.filter(match => 
-        match.name.toLowerCase().includes(searchQuery.toLowerCase())
+        match.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        match.driverType.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        match.bio.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
@@ -186,7 +138,7 @@ export default function MatchScreen() {
 
       <Text style={styles.bio} numberOfLines={2}>{item.bio}</Text>
 
-      <TouchableOpacity style={styles.viewMoreButton} onPress={() => handleViewMore(item)}>
+      <TouchableOpacity style={styles.viewMoreButton} onPress={() => handleViewMore(item)}> 
         <Text style={styles.viewMoreButtonText}>View More</Text>
         <Ionicons name="chevron-forward" size={20} color="#007AFF" />
       </TouchableOpacity>
@@ -201,10 +153,10 @@ export default function MatchScreen() {
 
       <View style={styles.searchSection}>
         <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color="#989" />
+          <Ionicons name="search" size={20} color="#999" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search for a person..."
+            placeholder="Search for a driver..."
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholderTextColor="#999"

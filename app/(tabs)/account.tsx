@@ -29,7 +29,8 @@ export default function AccountScreen() {
   const [loading, setLoading] = useState(false);
   
   const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const timeSlots = ['8:00 AM', '10:00 AM', '12:00 PM', '2:00 PM', '4:00 PM', '6:00 PM'];
+  const timeSlots = ['7:00 AM' ,'8:00 AM', '10:00 AM', '12:00 PM', '2:00 PM', '4:00 PM', '6:00 PM'];
+
 
   const [schedule, setSchedule] = useState<TimeSlot[]>(() => {
     const initialSchedule: TimeSlot[] = [];

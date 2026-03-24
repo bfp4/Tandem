@@ -1,3 +1,4 @@
+import { getBlocksByUser } from '@/services/scheduleBlockService';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -6,9 +7,11 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { getFinalSchedule } from './(tabs)/history';
 
 interface TimeSlot {
   day: string;
@@ -18,35 +21,47 @@ interface TimeSlot {
 }
 
 export default function DriverDetailsScreen() {
+  var finalSchedule = getFinalSchedule();
   const router = useRouter();
   const params = useLocalSearchParams();
   
+  const id = params.id as string || 'id'
   const driverName = params.name as string || 'Driver';
   const rating = parseFloat(params.rating as string) || 4.5;
   const totalRides = parseInt(params.totalRides as string) || 0;
   const driverType = params.driverType as string || 'Friendly';
   const bio = params.bio as string || '';
   const distance = params.distance as string || '';
+  var minTimeIndex = 0;
+  var maxTimeIndex = 0;
 
   const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const timeSlots = ['8:00 AM', '10:00 AM', '12:00 PM', '2:00 PM', '4:00 PM', '6:00 PM'];
+  const timeSlots = ['12:00 AM','12:15 AM','12:30 AM','12:45 AM','1:00 AM','1:15 AM','1:30 AM','1:45 AM'
+    ,'2:00 AM','2:15 AM','2:30 AM','2:45 AM','3:00 AM','3:15 AM','3:30 AM','3:45 AM'
+    ,'4:00 AM','4:15 AM','4:30 AM','4:45 AM','5:00 AM','5:15 AM','5:30 AM','5:45 AM'
+    ,'6:00 AM','6:15 AM','6:30 AM','6:45 AM','7:00 AM','7:15 AM','7:30 AM','7:45 AM'
+    ,'8:00 AM','8:15 AM','8:30 AM','8:45 AM','9:00 AM','9:15 AM','9:30 AM','9:45 AM'
+    ,'10:00 AM','10:15 AM','10:30 AM','10:45 AM','11:00 AM','11:15 AM','11:30 AM','11:45 AM'
+    ,'12:00 PM','12:15 PM','12:30 PM','12:45 PM','1:00 PM','1:15 PM','1:30 PM','1:45 PM'
+    ,'2:00 PM','2:15 PM','2:30 PM','2:45 PM','3:00 PM','3:15 PM','3:30 PM','3:45 PM'
+    ,'4:00 PM','4:15 PM','4:30 PM','4:45 PM','5:00 PM','5:15 PM','5:30 PM','5:45 PM'
+    ,'6:00 PM','6:15 PM','6:30 PM','6:45 PM','7:00 PM','7:15 PM','7:30 PM','7:45 PM'
+    ,'8:00 PM','8:15 PM','8:30 PM','8:45 PM','9:00 PM','9:15 PM','9:30 PM','9:45 PM'
+    ,'10:00 PM','10:15 PM','10:30 PM','10:45 PM','11:00 PM','11:15 PM','11:30 PM','11:45 PM'];
+
+  const blocks = getBlocksByUser(id);
 
   const [schedule] = useState<TimeSlot[]>([
     { day: 'Mon', time: '8:00 AM', available: true, requested: false },
-    { day: 'Mon', time: '10:00 AM', available: false, requested: false },
     { day: 'Mon', time: '12:00 PM', available: true, requested: false },
     { day: 'Mon', time: '2:00 PM', available: true, requested: false },
-    { day: 'Mon', time: '4:00 PM', available: false, requested: false },
     { day: 'Mon', time: '6:00 PM', available: true, requested: false },
     
     { day: 'Tue', time: '8:00 AM', available: true, requested: false },
     { day: 'Tue', time: '10:00 AM', available: true, requested: false },
-    { day: 'Tue', time: '12:00 PM', available: false, requested: false },
     { day: 'Tue', time: '2:00 PM', available: true, requested: false },
     { day: 'Tue', time: '4:00 PM', available: true, requested: false },
-    { day: 'Tue', time: '6:00 PM', available: false, requested: false },
     
-    { day: 'Wed', time: '8:00 AM', available: false, requested: false },
     { day: 'Wed', time: '10:00 AM', available: true, requested: false },
     { day: 'Wed', time: '12:00 PM', available: true, requested: false },
     { day: 'Wed', time: '2:00 PM', available: true, requested: false },
@@ -54,9 +69,7 @@ export default function DriverDetailsScreen() {
     { day: 'Wed', time: '6:00 PM', available: true, requested: false },
     
     { day: 'Thu', time: '8:00 AM', available: true, requested: false },
-    { day: 'Thu', time: '10:00 AM', available: false, requested: false },
     { day: 'Thu', time: '12:00 PM', available: true, requested: false },
-    { day: 'Thu', time: '2:00 PM', available: false, requested: false },
     { day: 'Thu', time: '4:00 PM', available: true, requested: false },
     { day: 'Thu', time: '6:00 PM', available: true, requested: false },
     
@@ -64,10 +77,7 @@ export default function DriverDetailsScreen() {
     { day: 'Fri', time: '10:00 AM', available: true, requested: false },
     { day: 'Fri', time: '12:00 PM', available: true, requested: false },
     { day: 'Fri', time: '2:00 PM', available: true, requested: false },
-    { day: 'Fri', time: '4:00 PM', available: false, requested: false },
-    { day: 'Fri', time: '6:00 PM', available: false, requested: false },
     
-    { day: 'Sat', time: '8:00 AM', available: false, requested: false },
     { day: 'Sat', time: '10:00 AM', available: true, requested: false },
     { day: 'Sat', time: '12:00 PM', available: true, requested: false },
     { day: 'Sat', time: '2:00 PM', available: true, requested: false },
@@ -75,14 +85,77 @@ export default function DriverDetailsScreen() {
     { day: 'Sat', time: '6:00 PM', available: true, requested: false },
     
     { day: 'Sun', time: '8:00 AM', available: true, requested: false },
-    { day: 'Sun', time: '10:00 AM', available: false, requested: false },
-    { day: 'Sun', time: '12:00 PM', available: false, requested: false },
     { day: 'Sun', time: '2:00 PM', available: true, requested: false },
     { day: 'Sun', time: '4:00 PM', available: true, requested: false },
     { day: 'Sun', time: '6:00 PM', available: true, requested: false },
   ]);
 
+  var [scheduleCopy] = useState<TimeSlot[]>([]);
+
+  const arrayIncludes = (element: TimeSlot) => {
+    finalSchedule = getFinalSchedule();
+      for(var i = 0; i < finalSchedule.length; i++){
+        if(finalSchedule[i].time == element.time && finalSchedule[i].day == element.day)
+          return true;
+      }
+      return false;
+  }
+
+  const remove = (array: TimeSlot[], element: TimeSlot) => {
+      let toReturn: TimeSlot[] = [];
+      for(var i = 0; i < array.length; i++){
+        if(array[i].time != element.time || array[i].day != element.day)
+          toReturn.push(element);
+      }
+      return toReturn;
+      // var indexToRemove = -1;
+      // for(var i = 0; i < array.length; i++){
+      //   if(array[i].time == element.time && array[i].day == element.day){
+      //     indexToRemove = i;
+      //     console.log("Hello");
+      //     break;
+      //   }
+      // }
+      // var toReturn = subArray(array, 0, indexToRemove);
+      // toReturn.push(subArray(array, indexToRemove + 1, array.length));
+      // return toReturn;
+  }
+
+  const findMinAndMaxTimes = (schedule: TimeSlot[]) => {
+      var minIndex = timeSlots.length;
+      var maxIndex = 0;
+      var index = 0;
+      schedule.forEach((element: TimeSlot) => {
+        if(arrayIncludes(element)){
+          index = timeSlots.indexOf(element.time);
+          if(index > maxIndex) maxIndex = index;
+          if(index < minIndex) minIndex = index;
+          scheduleCopy.push(element);
+        }
+      })
+      minTimeIndex = minIndex;
+      maxTimeIndex = maxIndex;
+  }
+
+  const subArray = (list: any[], startIndex: number, endIndex: number) => {
+      let toReturn: any[] = [];
+      for(var i = startIndex; i < endIndex; i++) toReturn.push(list[i]);
+      return toReturn;
+  }
+
+  const limitSchedule = (schedule: TimeSlot[]) => {
+      finalSchedule = getFinalSchedule()
+      for(var i = 0; i < scheduleCopy.length; i++)
+        scheduleCopy.pop();
+      findMinAndMaxTimes(schedule);
+      return subArray(timeSlots, minTimeIndex, maxTimeIndex+1);
+  }
+
+
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
+  const [sideBoxVisible, setSideBoxVisible] = useState(false);
+  const [sideBoxText1, setSideBoxText1] = useState('');
+  const [sideBoxText2, setSideBoxText2] = useState('');
 
   const handleSlotPress = (slot: TimeSlot) => {
     if (!slot.available || slot.requested) {
@@ -92,25 +165,37 @@ export default function DriverDetailsScreen() {
 
     setSelectedSlot(slot);
     slot.requested = true;
-    Alert.alert(
-      'Request Ride',
-      `Request a ride with ${driverName} on ${slot.day} at ${slot.time}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Request',
-          onPress: () => {
-            setSelectedSlot(slot)
-            slot.requested = true;
-            Alert.alert('Success', `Ride requested for ${slot.day} at ${slot.time}`);
-          }
-        }
-      ]
-    );
+    setSideBoxVisible(true);
+  };
+
+  const hideSideBox = () => {
+    setSideBoxVisible(false);
+  };
+
+  const confirmRideRequest = (selectedSlot: TimeSlot) => {
+    if(!selectedSlot) return;
+    setSideBoxVisible(false);
+
+    // if (!selectedSlot) return;
+    // Alert.alert(
+    //   'Request Ride',
+    //   `Request a ride with ${driverName} on ${selectedSlot.day} at ${selectedSlot.time}?`,
+    //   [
+    //     { text: 'Cancel', style: 'cancel' },
+    //     {
+    //       text: 'Request',
+    //       onPress: () => {
+            setSelectedSlot(selectedSlot)
+            selectedSlot.requested = true;
+    //         Alert.alert('Success', `Ride requested for ${selectedSlot.day} at ${selectedSlot.time}`);
+    //       },
+    //     },
+    //   ]
+    // );
   };
 
   const getSlotForDayAndTime = (day: string, time: string) => {
-    return schedule.find(slot => slot.day === day && slot.time === time);
+    return scheduleCopy.find(slot => slot.day === day && slot.time === time);
   };
 
   return (
@@ -160,50 +245,107 @@ export default function DriverDetailsScreen() {
           <Text style={styles.sectionTitle}>Weekly Schedule</Text>
           <Text style={styles.sectionSubtitle}>Select a time to request a ride</Text>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.scheduleGrid}>
-              <View style={styles.timeColumn}>
-                <View style={styles.dayHeaderCell} />
-                {timeSlots.map((time) => (
-                  <View key={time} style={styles.timeCell}>
-                    <Text style={styles.timeText}>{time}</Text>
+          <View style={styles.scheduleRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.scheduleScroll}
+              contentContainerStyle={styles.scheduleScrollContent}
+            >
+              <View style={styles.scheduleGrid}>
+                <View style={styles.timeColumn}>
+                  <View style={styles.dayHeaderCell} />
+                  {limitSchedule(schedule).map((time) => (
+                    <View key={time} style={styles.timeCell}>
+                      <Text style={styles.timeText}>{time}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {daysOfWeek.map((day) => (
+                  <View key={day} style={styles.dayColumn}>
+                    <View style={styles.dayHeaderCell}>
+                      <Text style={styles.dayHeaderText}>{day}</Text>
+                    </View>
+                    {limitSchedule(schedule).map((time) => {
+                      const slot = getSlotForDayAndTime(day, time);
+                      return (
+                        <TouchableOpacity
+                          key={`${day}-${time}`}
+                          style={[
+                            styles.slotCell,
+                            slot?.available ? styles.slotAvailable : styles.slotUnavailable,
+                            selectedSlot?.day === day && selectedSlot?.time === time && styles.slotSelected,
+                          slot?.requested && styles.slotRequested
+                          ]}
+                          onPress={() => slot && handleSlotPress(slot)}
+                          
+                      >
+                          {slot?.available && !slot.requested ? (
+                            <Ionicons name="checkmark" size={20} color="#34C759" />
+                          ) : slot?.requested ? (
+                          <Ionicons name="hourglass" size={20} color="#FF9800" />
+                        ) : (
+                            <Ionicons name="close" size={20} color="#ccc" />
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
                 ))}
               </View>
+            </ScrollView>
 
-              {daysOfWeek.map((day) => (
-                <View key={day} style={styles.dayColumn}>
-                  <View style={styles.dayHeaderCell}>
-                    <Text style={styles.dayHeaderText}>{day}</Text>
-                  </View>
-                  {timeSlots.map((time) => {
-                    const slot = getSlotForDayAndTime(day, time);
-                    return (
-                      <TouchableOpacity
-                        key={`${day}-${time}`}
-                        style={[
-                          styles.slotCell,
-                          slot?.available ? styles.slotAvailable : styles.slotUnavailable,
-                          selectedSlot?.day === day && selectedSlot?.time === time && styles.slotSelected,
-                          slot?.requested && styles.slotRequested
-                        ]}
-                        onPress={() => slot && handleSlotPress(slot)}
-                        
-                      >
-                        {slot?.available && !slot.requested ? (
-                          <Ionicons name="checkmark" size={20} color="#34C759" />
-                        ) : slot?.requested ? (
-                          <Ionicons name="hourglass" size={20} color="#FF9800" />
-                        ) : (
-                          <Ionicons name="close" size={20} color="#ccc" />
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
+            {sideBoxVisible && (
+              <View style={styles.scheduleSideBox}>
+                <View style={styles.scheduleSideBoxHeader}>
+                  <Text style={styles.scheduleSideBoxTitle} numberOfLines={2}>
+                    {selectedSlot
+                      ? `${selectedSlot.day} · ${selectedSlot.time}`
+                      : 'Ride details'}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={hideSideBox}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityLabel="Close details panel"
+                  >
+                    <Ionicons name="close" size={22} color="#666" />
+                  </TouchableOpacity>
                 </View>
-              ))}
-            </View>
-          </ScrollView>
+
+                <Text style={styles.sideInputLabel}>Puckup location</Text>
+                <TextInput
+                  style={styles.sideTextInput}
+                  placeholder="Insert pickup location"
+                  placeholderTextColor="#999"
+                  value={sideBoxText1}
+                  onChangeText={setSideBoxText1}
+                  multiline
+                />
+
+                <Text style={[styles.sideInputLabel, styles.sideInputLabelSecond]}>
+                  Drop off location
+                </Text>
+                <TextInput
+                  style={styles.sideTextInput}
+                  placeholder="Insert Drop off location"
+                  placeholderTextColor="#999"
+                  value={sideBoxText2}
+                  onChangeText={setSideBoxText2}
+                  multiline
+                />
+
+                <TouchableOpacity
+                  style={styles.sideBoxRequestButton}
+                  // onPress={() => slot && handleSlotPress(slot)}
+                  onPress={() => selectedSlot && confirmRideRequest(selectedSlot)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.sideBoxRequestButtonText}>Request ride</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
 
           <View style={styles.legend}>
             <View style={styles.legendItem}>
@@ -336,6 +478,17 @@ const styles = StyleSheet.create({
     color: '#999',
     marginBottom: 20,
   },
+  scheduleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  scheduleScroll: {
+    flex: 1,
+    minWidth: 0,
+  },
+  scheduleScrollContent: {
+    flexGrow: 1,
+  },
   scheduleGrid: {
     flexDirection: 'row',
   },
@@ -360,7 +513,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   timeCell: {
-    height: 56,
+    height: 30,
     width: 90,
     justifyContent: 'center',
     paddingRight: 8,
@@ -373,7 +526,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   slotCell: {
-    height: 56,
+    height: 30,
     width: 70,
     justifyContent: 'center',
     alignItems: 'center',
@@ -429,6 +582,62 @@ const styles = StyleSheet.create({
   legendText: {
     fontSize: 14,
     color: '#666',
+  },
+  scheduleSideBox: {
+    width: 168,
+    marginRight: 500,
+    padding: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  scheduleSideBoxHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 10,
+  },
+  scheduleSideBoxTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#333',
+  },
+  sideInputLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 4,
+  },
+  sideInputLabelSecond: {
+    marginTop: 8,
+  },
+  sideTextInput: {
+    minHeight: 56,
+    maxHeight: 88,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 12,
+    color: '#333',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    textAlignVertical: 'top',
+  },
+  sideBoxRequestButton: {
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+  },
+  sideBoxRequestButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
   },
   bottomPadding: {
     height: 32,
