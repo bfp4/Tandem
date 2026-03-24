@@ -1,0 +1,34 @@
+import { GeoPoint, Timestamp } from 'firebase/firestore';
+
+export interface PricingSnapshot {
+  baseFare: number;
+  perMileRate: number;
+  /** Miles */
+  calculatedDistance: number;
+  totalPrice: number;
+}
+
+/** Collection: /rideRequests/{requestId} */
+export interface RideRequest {
+  /** The block the rider tapped */
+  scheduleBlockId: string;
+  driverId: string;
+  riderId: string;
+  /** "HH:MM" — on a 15-min interval */
+  requestedStart: string;
+  /** "HH:MM" — on a 15-min interval */
+  requestedEnd: string;
+  /** "YYYY-MM-DD" */
+  date: string;
+  pickupLocation: GeoPoint;
+  dropoffLocation: GeoPoint;
+  status: 'pending' | 'confirmed' | 'denied' | 'cancelled';
+  repeating: boolean;
+  repeatDays: string[] | null;
+  repeatEndsAt: Timestamp | null;
+  seriesId: string | null;
+  /** null until confirmed */
+  pricingSnapshot: PricingSnapshot | null;
+  requestedAt: Timestamp;
+  respondedAt: Timestamp | null;
+}
