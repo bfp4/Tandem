@@ -1,16 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
-import { doc, setDoc } from 'firebase/firestore';
-import { getFunctions } from 'firebase/functions';
 import React, { useState } from 'react';
 import {
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View
 } from 'react-native';
-import { db } from '../../config/firebase';
 import { useAuth } from '../../context/AuthContext';
 
 interface TimeSlot {
@@ -19,8 +15,13 @@ interface TimeSlot {
   available: boolean;
 }
 
+var finalSchedule: TimeSlot[] = [];
+
+export function getFinalSchedule(): TimeSlot[] {
+  return finalSchedule;
+}
+
 export default function ScheduleScreen(){
-  const functions = getFunctions();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -37,7 +38,6 @@ export default function ScheduleScreen(){
                       ,'6:00 PM','6:15 PM','6:30 PM','6:45 PM','7:00 PM','7:15 PM','7:30 PM','7:45 PM'
                       ,'8:00 PM','8:15 PM','8:30 PM','8:45 PM','9:00 PM','9:15 PM','9:30 PM','9:45 PM'
                       ,'10:00 PM','10:15 PM','10:30 PM','10:45 PM','11:00 PM','11:15 PM','11:30 PM','11:45 PM'];
-
   const [schedule, setSchedule] = useState<TimeSlot[]>(() => {
     const initialSchedule: TimeSlot[] = [];
     daysOfWeek.forEach(day => {
@@ -62,23 +62,31 @@ export default function ScheduleScreen(){
     );
   };
 
-  const handleSaveSchedule = async () => {
-    if (!user) return;
+  const handleSaveSchedule = () => {
+    finalSchedule = [];
+    schedule.forEach((element: TimeSlot) => {
+      if(element.available) finalSchedule.push(element);
+    })
+  }
+  
 
-    setLoading(true);
-    try {
-      const docRef = doc(db, 'users', user.uid);
-      await setDoc(docRef, { 
-        schedule: schedule,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-      Alert.alert('Success', 'Profile and schedule saved to Firebase!');
-    } catch (error: any) {
-      Alert.alert('Error', error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // const handleSaveSchedule = async () => {
+  //   if (!user) return;
+
+  //   setLoading(true);
+  //   try {
+  //     const docRef = doc(db, 'users', user.uid);
+  //     await setDoc(docRef, { 
+  //       schedule: schedule,
+  //       updatedAt: new Date().toISOString(),
+  //     }, { merge: true });
+  //     Alert.alert('Success', 'Profile and schedule saved to Firebase!');
+  //   } catch (error: any) {
+  //     Alert.alert('Error', error.message);
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
 
   return (
     <ScrollView style={styles.container}>
