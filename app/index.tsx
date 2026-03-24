@@ -1,9 +1,9 @@
-import { useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useAuth } from '../context/AuthContext';
 import { doc, getDoc } from 'firebase/firestore';
+import React, { useEffect } from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { db } from '../config/firebase';
+import { useAuth } from '../context/AuthContext';
 
 export default function Index() {
   const { user, loading } = useAuth();

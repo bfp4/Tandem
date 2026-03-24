@@ -1,11 +1,17 @@
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
+  query,
+  where,
+  orderBy,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '@/config/firebase';
+import type { Rating } from '@/types/rating';
 
 function ratingDocId(rideRequestId: string, fromUserId: string): string {
   return `${rideRequestId}_${fromUserId}`;
@@ -61,4 +67,29 @@ export async function updateRating(
     comment: comment ?? null,
     updatedAt: serverTimestamp(),
   });
+}
+
+export async function getRating(
+  rideRequestId: string,
+  fromUserId: string,
+): Promise<Rating> {
+  const id = ratingDocId(rideRequestId, fromUserId);
+  const snap = await getDoc(doc(db, 'ratings', id));
+  if (!snap.exists()) {
+    throw new Error(
+      `No rating found for rideRequest "${rideRequestId}" by user "${fromUserId}".`,
+    );
+  }
+  return snap.data() as Rating;
+}
+
+export async function getRatingsByUser(userId: string): Promise<Rating[]> {
+  const snap = await getDocs(
+    query(
+      collection(db, 'ratings'),
+      where('toUserId', '==', userId),
+      orderBy('createdAt', 'desc'),
+    ),
+  );
+  return snap.docs.map((d) => d.data() as Rating);
 }

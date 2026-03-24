@@ -34,6 +34,8 @@ export interface User {
    * @readonly - set by Cloud Function only
    */
   missingFields: string[];
+  /** Geohash of the user's location — updated whenever address/location changes */
+  geohash: string;
   createdAt: Timestamp;
   /** Driver only — null for riders */
   carDetails: {
@@ -42,4 +44,6 @@ export interface User {
     /** URL to Firebase Storage */
     photo: string;
   } | null;
+
+  uid: string;
 }

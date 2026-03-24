@@ -1,17 +1,16 @@
-import {
-  collection,
-  doc,
-  addDoc,
-  updateDoc,
-  getDocs,
-  query,
-  where,
-  serverTimestamp,
-  Transaction,
-  DocumentReference,
-} from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import type { ScheduleBlock } from '@/types/scheduleBlock';
+import {
+  addDoc,
+  collection,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  Transaction,
+  updateDoc,
+  where
+} from 'firebase/firestore';
 
 export async function createScheduleBlock(
   data: Omit<ScheduleBlock, 'createdAt'>,
@@ -23,15 +22,14 @@ export async function createScheduleBlock(
   return ref.id;
 }
 
-export async function getOpenBlocksForDriver(
-  driverId: string,
+export async function getBlocksByUser(
+  userId: string,
+  options?: { role?: 'driver' | 'rider'; status?: ScheduleBlock['status'] },
 ): Promise<ScheduleBlock[]> {
-  const q = query(
-    collection(db, 'scheduleBlocks'),
-    where('userId', '==', driverId),
-    where('status', '==', 'open'),
-  );
-  const snap = await getDocs(q);
+  const constraints = [where('userId', '==', userId)];
+  if (options?.role) constraints.push(where('role', '==', options.role));
+  if (options?.status) constraints.push(where('status', '==', options.status));
+  const snap = await getDocs(query(collection(db, 'scheduleBlocks'), ...constraints));
   return snap.docs.map((d) => d.data() as ScheduleBlock);
 }
 

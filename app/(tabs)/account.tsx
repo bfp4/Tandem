@@ -1,19 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  StyleSheet, 
-  Text, 
-  View, 
-  TouchableOpacity, 
-  Alert,
-  TextInput,
-  ScrollView,
-} from 'react-native';
-import { signOut } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../../config/firebase';
-import { useRouter } from 'expo-router';
-import { useAuth } from '../../context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { signOut } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
+import {
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { auth, db } from '../../config/firebase';
+import { useAuth } from '../../context/AuthContext';
 
 interface TimeSlot {
   day: string;
@@ -29,7 +29,8 @@ export default function AccountScreen() {
   const [loading, setLoading] = useState(false);
   
   const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const timeSlots = ['8:00 AM', '10:00 AM', '12:00 PM', '2:00 PM', '4:00 PM', '6:00 PM'];
+  const timeSlots = ['7:00 AM' ,'8:00 AM', '10:00 AM', '12:00 PM', '2:00 PM', '4:00 PM', '6:00 PM'];
+
 
   const [schedule, setSchedule] = useState<TimeSlot[]>(() => {
     const initialSchedule: TimeSlot[] = [];

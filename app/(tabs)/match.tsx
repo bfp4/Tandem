@@ -1,3 +1,6 @@
+import { signUpWithEmail } from '@/services/authService';
+import { getAllDrivers } from '@/services/userService';
+import { User } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -9,27 +12,32 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 interface Match {
   id: string;
   name: string;
-  distance: string;
+  distance: number;
   rating: number;
   totalRides: number;
-  driverType: 'Quiet' | 'Talkative' | 'Friendly' | 'Professional';
+  driverType: string;
   bio: string;
 }
 
 export default function MatchScreen() {
   const router = useRouter();
+  // const { user: authUser } = useAuth();
   const [matches, setMatches] = useState<Match[]>([]);
   const [filteredMatches, setFilteredMatches] = useState<Match[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedRating, setSelectedRating] = useState<number | null>(null);
   const [selectedDriverType, setSelectedDriverType] = useState<string | null>(null);
+
+  const makeUsers = () => {
+      signUpWithEmail('example@email.com', 'examplePassowrd');
+  }
 
   useEffect(() => {
     loadMatches();
@@ -39,54 +47,36 @@ export default function MatchScreen() {
     applyFilters();
   }, [searchQuery, selectedRating, selectedDriverType, matches]);
 
+  const driverTypes = ['Quiet', 'Talkitive', 'Friendly', 'Professional'];
+
   const loadMatches = async () => {
-    const sampleMatches: Match[] = [
-      { 
-        id: '1', 
-        name: 'Alex Johnson', 
-        distance: '0.5 mi', 
-        rating: 4.9, 
-        totalRides: 234,
-        driverType: 'Quiet',
-        bio: 'Prefer peaceful rides with minimal conversation. Always on time and professional.'
-      },
-      { 
-        id: '2', 
-        name: 'Sam Martinez', 
-        distance: '1.2 mi', 
-        rating: 4.7, 
-        totalRides: 156,
-        driverType: 'Talkative',
-        bio: 'Love chatting and making new friends! Great music playlist and always friendly.'
-      },
-      { 
-        id: '3', 
-        name: 'Jordan Lee', 
-        distance: '2.1 mi', 
-        rating: 4.8, 
-        totalRides: 189,
-        driverType: 'Professional',
-        bio: 'Experienced driver with focus on safety and comfort. Clean car, smooth rides.'
-      },
-      { 
-        id: '4', 
-        name: 'Taylor Smith', 
-        distance: '0.8 mi', 
-        rating: 5.0, 
-        totalRides: 312,
-        driverType: 'Friendly',
-        bio: 'Happy to help with luggage and flexible with stops. 5+ years of driving experience.'
-      },
-    ];
+    makeUsers;
+    const data = await getAllDrivers();
+    let sampleMatches: Match[] = [];
+    (data).forEach((element: User) => {
+        const elementData = {
+          id: element.uid,
+          name: element.name,
+          rating: element.starRating,
+          driverType: driverTypes[Math.floor((Math.random() * 100)%4)],
+          distance: 0,
+          totalRides: element.rideCount,
+          bio: element.bio
+        }
+        sampleMatches.push(elementData);
+      })
+      sampleMatches.sort((a, b) => b.rating - a.rating);
     setMatches(sampleMatches);
-  };
+  }
 
   const applyFilters = () => {
     let filtered = [...matches];
 
     if (searchQuery) {
       filtered = filtered.filter(match => 
-        match.name.toLowerCase().includes(searchQuery.toLowerCase())
+        match.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        match.driverType.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        match.bio.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
@@ -148,7 +138,7 @@ export default function MatchScreen() {
 
       <Text style={styles.bio} numberOfLines={2}>{item.bio}</Text>
 
-      <TouchableOpacity style={styles.viewMoreButton} onPress={() => handleViewMore(item)}>
+      <TouchableOpacity style={styles.viewMoreButton} onPress={() => handleViewMore(item)}> 
         <Text style={styles.viewMoreButtonText}>View More</Text>
         <Ionicons name="chevron-forward" size={20} color="#007AFF" />
       </TouchableOpacity>
@@ -163,10 +153,10 @@ export default function MatchScreen() {
 
       <View style={styles.searchSection}>
         <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color="#989" />
+          <Ionicons name="search" size={20} color="#999" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search for a person..."
+            placeholder="Search for a driver..."
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholderTextColor="#999"
