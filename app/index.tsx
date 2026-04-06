@@ -22,14 +22,14 @@ export default function Index() {
       try {
         const snap = await getDoc(doc(db, 'users', user.uid));
         if (!snap.exists() || !snap.data()?.username) {
-          // No profile doc yet — route to details flow
           router.replace('/signup/details' as any);
         } else {
           router.replace('/(tabs)/home' as any);
         }
-      } catch {
-        // If we can't fetch, send to details to be safe
-        router.replace('/signup/details' as any);
+      } catch (error) {
+        console.error('Failed to fetch user profile:', error);
+        // On error, fall back to login rather than signup flow
+        router.replace('./login' as any);
       }
     };
 
