@@ -1,10 +1,13 @@
+import { useAuth } from '@/context/AuthContext';
 import { signUpWithEmail } from '@/services/authService';
+import { getOrCreateConversation } from '@/services/messagingService';
 import { getAllDrivers } from '@/services/userService';
 import { User } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   FlatList,
   Modal,
   ScrollView,
@@ -12,7 +15,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 
 interface Match {
@@ -27,7 +30,7 @@ interface Match {
 
 export default function MatchScreen() {
   const router = useRouter();
-  // const { user: authUser } = useAuth();
+  const { user } = useAuth();
   const [matches, setMatches] = useState<Match[]>([]);
   const [filteredMatches, setFilteredMatches] = useState<Match[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -112,6 +115,22 @@ export default function MatchScreen() {
     });
   };
 
+  const handleMessage = async (driver: Match) => {
+    if (!user) {
+      Alert.alert('Sign in required', 'You must be signed in to send messages.');
+      return;
+    }
+    try {
+      const conversationId = await getOrCreateConversation(user.uid, driver.id);
+      router.push({
+        pathname: '/conversation/[id]',
+        params: { id: conversationId, otherUserId: driver.id },
+      });
+    } catch (e) {
+      Alert.alert('Error', 'Could not open conversation. Please try again.');
+    }
+  };
+
   const renderMatch = ({ item }: { item: Match }) => (
     <View style={styles.matchCard}>
       <View style={styles.matchHeader}>
@@ -138,10 +157,16 @@ export default function MatchScreen() {
 
       <Text style={styles.bio} numberOfLines={2}>{item.bio}</Text>
 
-      <TouchableOpacity style={styles.viewMoreButton} onPress={() => handleViewMore(item)}> 
-        <Text style={styles.viewMoreButtonText}>View More</Text>
-        <Ionicons name="chevron-forward" size={20} color="#007AFF" />
-      </TouchableOpacity>
+      <View style={styles.cardActions}>
+        <TouchableOpacity style={styles.messageButton} onPress={() => handleMessage(item)}>
+          <Ionicons name="chatbubble-ellipses" size={16} color="#007AFF" />
+          <Text style={styles.messageButtonText}>Message</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.viewMoreButton} onPress={() => handleViewMore(item)}>
+          <Text style={styles.viewMoreButtonText}>View More</Text>
+          <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -407,7 +432,29 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 12,
   },
+  cardActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  messageButton: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    gap: 6,
+  },
+  messageButtonText: {
+    color: '#007AFF',
+    fontSize: 15,
+    fontWeight: '600',
+  },
   viewMoreButton: {
+    flex: 1,
     flexDirection: 'row',
     backgroundColor: '#f0f7ff',
     borderRadius: 12,
