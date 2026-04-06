@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -11,15 +11,36 @@ import {
   Platform,
   ScrollView,
   Image,
+  FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from '../../config/firebase';
 
 type Role = 'driver' | 'rider';
+
+interface FieldErrors {
+  username?: string;
+  name?: string;
+  phone?: string;
+  address?: string;
+  roles?: string;
+}
+
+interface AddressSuggestion {
+  place_id: number;
+  display_name: string;
+  type?: string;
+  class?: string;
+}
+
+function isValidPhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 15;
+}
 
 export default function UserDetailsScreen() {
   const router = useRouter();
@@ -33,10 +54,16 @@ export default function UserDetailsScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [addressLoading, setAddressLoading] = useState(false);
+  const addressDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const toggleRole = (role: Role) => {
     setRoles(prev =>
       prev.includes(role) ? prev.filter(r => r !== role) : [...prev, role]
     );
+    if (errors.roles) setErrors(prev => ({ ...prev, roles: undefined }));
   };
 
   const pickPhoto = async () => {
@@ -64,32 +91,109 @@ export default function UserDetailsScreen() {
     return await getDownloadURL(storageRef);
   };
 
-  const handleContinue = async () => {
-    if (!username.trim()) return Alert.alert('Required', 'Username is required.');
-    if (!name.trim()) return Alert.alert('Required', 'Full name is required.');
-    if (!phone.trim()) return Alert.alert('Required', 'Phone number is required.');
-    if (!address.trim()) return Alert.alert('Required', 'Address is required.');
-    if (!bio.trim()) return Alert.alert('Required', 'Bio is required.');
-    if (roles.length === 0) return Alert.alert('Required', 'Please select at least one role.');
+  const onAddressChange = useCallback((text: string) => {
+    setAddress(text);
+    if (errors.address) setErrors(prev => ({ ...prev, address: undefined }));
+    setAddressSuggestions([]);
 
+    if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current);
+
+    if (text.trim().length < 3) return;
+
+    addressDebounceRef.current = setTimeout(async () => {
+      setAddressLoading(true);
+      try {
+        const encoded = encodeURIComponent(text.trim());
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&addressdetails=1&limit=8&featuretype=house`,
+          { headers: { 'Accept-Language': 'en', 'User-Agent': 'HuberApp/1.0' } }
+        );
+        const raw: AddressSuggestion[] = await res.json();
+        // Keep only street-level results (houses, buildings, roads)
+        const streetTypes = new Set(['house', 'building', 'residential', 'road', 'street', 'place']);
+        const filtered = raw.filter(r => streetTypes.has(r.type ?? '') || r.class === 'building' || r.class === 'highway');
+        setAddressSuggestions(filtered.length > 0 ? filtered : raw.slice(0, 5));
+      } catch {
+        // silently ignore lookup failures
+      } finally {
+        setAddressLoading(false);
+      }
+    }, 400);
+  }, [errors.address]);
+
+  const selectAddress = (suggestion: AddressSuggestion) => {
+    setAddress(suggestion.display_name);
+    setAddressSuggestions([]);
+    setErrors(prev => ({ ...prev, address: undefined }));
+  };
+
+  const validate = async (): Promise<boolean> => {
+    const newErrors: FieldErrors = {};
+
+    if (!username.trim()) {
+      newErrors.username = 'Username is required.';
+    } else if (!/^[a-zA-Z0-9_]{3,20}$/.test(username.trim())) {
+      newErrors.username = 'Username must be 3–20 characters (letters, numbers, underscores).';
+    } else {
+      try {
+        const q = query(collection(db, 'users'), where('username', '==', username.trim().toLowerCase()));
+        const snap = await getDocs(q);
+        const takenByOther = snap.docs.some(d => d.id !== auth.currentUser?.uid);
+        if (takenByOther) {
+          newErrors.username = 'That username is already taken.';
+        }
+      } catch {
+        // If the uniqueness check fails (e.g. permissions), skip it — Firestore write will catch real conflicts
+      }
+    }
+
+    if (!name.trim()) {
+      newErrors.name = 'Full name is required.';
+    }
+
+    if (!phone.trim()) {
+      newErrors.phone = 'Phone number is required.';
+    } else if (!isValidPhone(phone)) {
+      newErrors.phone = 'Enter a valid phone number (at least 10 digits).';
+    }
+
+    if (!address.trim()) {
+      newErrors.address = 'Address is required.';
+    }
+
+    if (roles.length === 0) {
+      newErrors.roles = 'Please select at least one role.';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleContinue = async () => {
     const uid = auth.currentUser?.uid;
-    const email = auth.currentUser?.email ?? '';
     if (!uid) {
       Alert.alert('Error', 'No authenticated user found. Please sign in again.');
       return;
     }
 
+    // Run validation before showing loading state so errors are visible
+    const valid = await validate();
+    if (!valid) return;
+
     setLoading(true);
     try {
+
       let profilePhotoUrl = '';
       if (photoUri) {
         profilePhotoUrl = await uploadPhoto(photoUri, uid);
       }
 
+      const email = auth.currentUser?.email ?? '';
+
       await setDoc(
         doc(db, 'users', uid),
         {
-          username: username.trim(),
+          username: username.trim().toLowerCase(),
           name: name.trim(),
           email,
           phone: phone.trim(),
@@ -159,64 +263,111 @@ export default function UserDetailsScreen() {
 
         {/* Form Fields */}
         <View style={styles.form}>
+          {/* Username */}
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>
               Username <Text style={styles.required}>*</Text>
             </Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, errors.username ? styles.inputError : null]}
               placeholder="e.g. johndoe"
               value={username}
-              onChangeText={setUsername}
+              onChangeText={t => {
+                setUsername(t);
+                if (errors.username) setErrors(prev => ({ ...prev, username: undefined }));
+              }}
               autoCapitalize="none"
               placeholderTextColor="#bbb"
             />
+            {errors.username ? <Text style={styles.errorText}>{errors.username}</Text> : null}
           </View>
 
+          {/* Full Name */}
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>
               Full Name <Text style={styles.required}>*</Text>
             </Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, errors.name ? styles.inputError : null]}
               placeholder="e.g. John Doe"
               value={name}
-              onChangeText={setName}
+              onChangeText={t => {
+                setName(t);
+                if (errors.name) setErrors(prev => ({ ...prev, name: undefined }));
+              }}
               placeholderTextColor="#bbb"
             />
+            {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
           </View>
 
+          {/* Phone */}
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>
               Phone Number <Text style={styles.required}>*</Text>
             </Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, errors.phone ? styles.inputError : null]}
               placeholder="e.g. (555) 000-0000"
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={t => {
+                setPhone(t);
+                if (errors.phone) setErrors(prev => ({ ...prev, phone: undefined }));
+              }}
               keyboardType="phone-pad"
               placeholderTextColor="#bbb"
             />
+            {errors.phone ? <Text style={styles.errorText}>{errors.phone}</Text> : null}
           </View>
 
+          {/* Address with autocomplete */}
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>
               Address <Text style={styles.required}>*</Text>
             </Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. 123 Main St, City, State"
-              value={address}
-              onChangeText={setAddress}
-              placeholderTextColor="#bbb"
-            />
+            <View>
+              <View style={[styles.addressInputRow, errors.address ? styles.inputError : null]}>
+                <TextInput
+                  style={styles.addressInput}
+                  placeholder="e.g. 123 Main St, City, State"
+                  value={address}
+                  onChangeText={onAddressChange}
+                  placeholderTextColor="#bbb"
+                />
+                {addressLoading && (
+                  <ActivityIndicator size="small" color="#007AFF" style={styles.addressSpinner} />
+                )}
+              </View>
+              {addressSuggestions.length > 0 && (
+                <View style={styles.suggestionsContainer}>
+                  <FlatList
+                    data={addressSuggestions}
+                    keyExtractor={item => String(item.place_id)}
+                    keyboardShouldPersistTaps="handled"
+                    scrollEnabled={false}
+                    renderItem={({ item, index }) => (
+                      <TouchableOpacity
+                        style={[
+                          styles.suggestionItem,
+                          index < addressSuggestions.length - 1 && styles.suggestionItemBorder,
+                        ]}
+                        onPress={() => selectAddress(item)}
+                      >
+                        <Ionicons name="location-outline" size={14} color="#888" style={styles.suggestionIcon} />
+                        <Text style={styles.suggestionText} numberOfLines={2}>
+                          {item.display_name}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  />
+                </View>
+              )}
+            </View>
+            {errors.address ? <Text style={styles.errorText}>{errors.address}</Text> : null}
           </View>
 
+          {/* Bio (optional) */}
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>
-              Bio <Text style={styles.required}>*</Text>
-            </Text>
+            <Text style={styles.label}>Bio <Text style={styles.optional}>(optional)</Text></Text>
             <TextInput
               style={[styles.input, styles.bioInput]}
               placeholder="Tell riders/drivers about yourself..."
@@ -235,7 +386,7 @@ export default function UserDetailsScreen() {
               I want to be a <Text style={styles.required}>*</Text>
             </Text>
             <Text style={styles.roleHint}>Select all that apply</Text>
-            <View style={styles.roleRow}>
+            <View style={[styles.roleRow, errors.roles ? styles.roleRowError : null]}>
               <TouchableOpacity
                 style={[
                   styles.roleCard,
@@ -292,6 +443,7 @@ export default function UserDetailsScreen() {
                 )}
               </TouchableOpacity>
             </View>
+            {errors.roles ? <Text style={styles.errorText}>{errors.roles}</Text> : null}
           </View>
         </View>
 
@@ -396,6 +548,10 @@ const styles = StyleSheet.create({
   required: {
     color: '#FF3B30',
   },
+  optional: {
+    color: '#aaa',
+    fontWeight: '400',
+  },
   input: {
     backgroundColor: '#f7f7f7',
     borderRadius: 12,
@@ -405,9 +561,70 @@ const styles = StyleSheet.create({
     borderColor: '#ebebeb',
     color: '#111',
   },
+  inputError: {
+    borderColor: '#FF3B30',
+    borderWidth: 1.5,
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 12,
+    marginTop: 5,
+    marginLeft: 2,
+  },
   bioInput: {
     height: 100,
     paddingTop: 14,
+  },
+  addressInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f7f7f7',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ebebeb',
+    paddingHorizontal: 14,
+  },
+  addressInput: {
+    flex: 1,
+    paddingVertical: 14,
+    fontSize: 15,
+    color: '#111',
+  },
+  addressSpinner: {
+    marginLeft: 8,
+  },
+  suggestionsContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    marginTop: 4,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+  },
+  suggestionItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  suggestionIcon: {
+    marginRight: 8,
+    marginTop: 2,
+  },
+  suggestionText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#333',
+    lineHeight: 18,
   },
   roleHint: {
     fontSize: 12,
@@ -418,6 +635,13 @@ const styles = StyleSheet.create({
   roleRow: {
     flexDirection: 'row',
     gap: 12,
+    borderRadius: 14,
+  },
+  roleRowError: {
+    borderWidth: 1.5,
+    borderColor: '#FF3B30',
+    borderRadius: 14,
+    padding: 4,
   },
   roleCard: {
     flex: 1,

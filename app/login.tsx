@@ -12,7 +12,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { signInWithEmail, signUpWithEmail, signInWithGoogle } from '../services/authService';
+import { signInWithEmail, signUpWithEmail } from '../services/authService';
 import { useRouter } from 'expo-router';
 
 type Mode = 'landing' | 'login' | 'signup';
@@ -23,7 +23,6 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const router = useRouter();
 
   const handleEmailLogin = async () => {
@@ -66,18 +65,6 @@ export default function LoginScreen() {
     }
   };
 
-  const handleGoogle = async () => {
-    setGoogleLoading(true);
-    try {
-      await signInWithGoogle();
-      router.replace('/signup/details' as any);
-    } catch (error: any) {
-      Alert.alert('Google Sign In Failed', error.message);
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
-
   if (mode === 'landing') {
     return (
       <View style={styles.container}>
@@ -90,27 +77,6 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.authSection}>
-          <TouchableOpacity
-            style={styles.googleButton}
-            onPress={handleGoogle}
-            disabled={googleLoading}
-          >
-            {googleLoading ? (
-              <ActivityIndicator color="#333" />
-            ) : (
-              <>
-                <Ionicons name="logo-google" size={20} color="#EA4335" style={styles.googleIcon} />
-                <Text style={styles.googleButtonText}>Continue with Google</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
           <TouchableOpacity
             style={styles.primaryButton}
             onPress={() => setMode('signup')}
@@ -149,27 +115,6 @@ export default function LoginScreen() {
           <Text style={styles.formSubtitle}>
             {mode === 'login' ? 'Sign in to continue' : 'Get started with Huber'}
           </Text>
-
-          <TouchableOpacity
-            style={styles.googleButton}
-            onPress={handleGoogle}
-            disabled={googleLoading}
-          >
-            {googleLoading ? (
-              <ActivityIndicator color="#333" />
-            ) : (
-              <>
-                <Ionicons name="logo-google" size={20} color="#EA4335" style={styles.googleIcon} />
-                <Text style={styles.googleButtonText}>Continue with Google</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
 
           <TextInput
             style={styles.input}
@@ -290,40 +235,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#888',
     marginBottom: 28,
-  },
-  googleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1.5,
-    borderColor: '#e0e0e0',
-  },
-  googleIcon: {
-    marginRight: 10,
-  },
-  googleButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#e0e0e0',
-  },
-  dividerText: {
-    marginHorizontal: 12,
-    color: '#999',
-    fontSize: 13,
   },
   input: {
     backgroundColor: '#f7f7f7',
