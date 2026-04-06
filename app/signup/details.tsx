@@ -193,6 +193,7 @@ export default function UserDetailsScreen() {
       await setDoc(
         doc(db, 'users', uid),
         {
+          uid,
           username: username.trim().toLowerCase(),
           name: name.trim(),
           email,

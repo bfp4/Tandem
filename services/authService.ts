@@ -69,7 +69,7 @@ export async function getCurrentUserProfile(): Promise<User> {
     throw new Error(`User document not found for uid: ${currentUser.uid}`);
   }
 
-  return snap.data() as User;
+  return { ...snap.data(), uid: snap.id } as User;
 }
 
 /**
