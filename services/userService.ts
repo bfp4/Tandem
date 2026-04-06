@@ -29,7 +29,7 @@ export interface UserFilters {
 export async function getUser(userId: string): Promise<User> {
   const snap = await getDoc(doc(db, 'users', userId));
   if (!snap.exists()) throw new Error(`User not found: ${userId}`);
-  return snap.data() as User;
+  return { ...snap.data(), uid: snap.id } as User;
 }
 
 export async function updateUser(
@@ -163,7 +163,7 @@ async function getUsersByRole(
 
 export async function getAllDrivers(filters?: UserFilters): Promise<User[]> {
   const rows = await getUsersByRole('driver', filters);
-  return rows.map((r) => r.data);
+  return rows.map((r) => ({ ...r.data, uid: r.id }));
 }
 
 /** Same as getAllDrivers but keeps Firestore document id (Auth uid). */
@@ -175,5 +175,5 @@ export async function getAllDriversWithIds(
 
 export async function getAllRiders(filters?: UserFilters): Promise<User[]> {
   const rows = await getUsersByRole('rider', filters);
-  return rows.map((r) => r.data);
+  return rows.map((r) => ({ ...r.data, uid: r.id }));
 }
