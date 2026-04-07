@@ -1,5 +1,6 @@
 import { useAuth } from '@/context/AuthContext';
 import {
+  deleteConversationIfEmpty,
   markConversationRead,
   sendMessage,
   subscribeToMessages,
@@ -12,7 +13,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Timestamp } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -29,9 +29,10 @@ function formatMessageTime(ts: Timestamp): string {
 }
 
 export default function ConversationScreen() {
-  const { id: conversationId, otherUserId } = useLocalSearchParams<{
+  const { id: conversationId, otherUserId, pending } = useLocalSearchParams<{
     id: string;
     otherUserId: string;
+    pending?: string;
   }>();
   const { user } = useAuth();
   const router = useRouter();
@@ -40,7 +41,8 @@ export default function ConversationScreen() {
   const [otherUser, setOtherUser] = useState<User | null>(null);
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
-  const [loading, setLoading] = useState(true);
+  // Tracks whether the Firestore conversation doc has been created yet.
+  const isPendingRef = useRef(pending === 'true');
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
@@ -51,24 +53,49 @@ export default function ConversationScreen() {
   useEffect(() => {
     if (!conversationId || !user) return;
 
+    // If the conversation is pending, there's no Firestore doc yet — skip
+    // markConversationRead and the message listener until the first send.
+    if (isPendingRef.current) {
+      return;
+    }
+
     markConversationRead(conversationId, user.uid).catch(console.error);
 
     const unsub = subscribeToMessages(conversationId, (msgs) => {
       setMessages(msgs);
-      setLoading(false);
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     });
 
     return unsub;
   }, [conversationId, user]);
 
+  const handleBack = async () => {
+    // Clean up the conversation doc if the user navigates away without sending.
+    if (conversationId && !isPendingRef.current) {
+      await deleteConversationIfEmpty(conversationId).catch(console.error);
+    }
+    router.back();
+  };
+
   const handleSend = async () => {
     if (!inputText.trim() || !user || !conversationId || !otherUserId || sending) return;
     const text = inputText.trim();
     setInputText('');
     setSending(true);
+    const wasPending = isPendingRef.current;
     try {
-      await sendMessage(conversationId, user.uid, otherUserId, text);
+      await sendMessage(conversationId, user.uid, otherUserId, text, wasPending);
+      if (wasPending) {
+        // Doc now exists — start the real-time listener.
+        isPendingRef.current = false;
+        markConversationRead(conversationId, user.uid).catch(console.error);
+        const unsub = subscribeToMessages(conversationId, (msgs) => {
+          setMessages(msgs);
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+        });
+        // Store unsub so it cleans up when the screen unmounts.
+        return () => unsub();
+      }
     } catch (e) {
       console.error('Failed to send message:', e);
       setInputText(text);
@@ -103,7 +130,7 @@ export default function ConversationScreen() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
           <Ionicons name="chevron-back" size={28} color="#007AFF" />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
@@ -116,12 +143,7 @@ export default function ConversationScreen() {
       </View>
 
       {/* Messages */}
-      {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#007AFF" />
-        </View>
-      ) : (
-        <FlatList
+      <FlatList
           ref={flatListRef}
           data={messages}
           renderItem={renderMessage}
@@ -138,7 +160,6 @@ export default function ConversationScreen() {
             flatListRef.current?.scrollToEnd({ animated: false })
           }
         />
-      )}
 
       {/* Input bar */}
       <View style={styles.inputBar}>
@@ -170,11 +191,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',

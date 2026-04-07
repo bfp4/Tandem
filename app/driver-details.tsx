@@ -206,11 +206,15 @@ export default function DriverDetailsScreen() {
       Alert.alert('Sign in required', 'You must be signed in to send messages.');
       return;
     }
+    if (!id || id === 'id') {
+      Alert.alert('Error', 'Unable to message this driver. Please try again later.');
+      return;
+    }
     try {
-      const conversationId = await getOrCreateConversation(user.uid, id);
+      const { conversationId, isPending } = await getOrCreateConversation(user.uid, id);
       router.push({
         pathname: '/conversation/[id]',
-        params: { id: conversationId, otherUserId: id },
+        params: { id: conversationId, otherUserId: id, pending: isPending ? 'true' : 'false' },
       });
     } catch (e) {
       Alert.alert('Error', 'Could not open conversation. Please try again.');

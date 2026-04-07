@@ -4,9 +4,11 @@ import type { Message } from '@/types/message';
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
+  getDoc,
   getDocs,
-  limit,
+  increment,
   onSnapshot,
   orderBy,
   query,
@@ -26,13 +28,13 @@ export interface MessageWithId extends Message {
 }
 
 /**
- * Finds an existing conversation between two users or creates a new one.
- * Returns the conversation ID.
+ * Returns the ID of an existing conversation between two users, or null if none exists.
+ * Does NOT create a new conversation.
  */
-export async function getOrCreateConversation(
+export async function findExistingConversation(
   uid1: string,
   uid2: string,
-): Promise<string> {
+): Promise<string | null> {
   const snap = await getDocs(
     query(
       collection(db, 'conversations'),
@@ -45,17 +47,63 @@ export async function getOrCreateConversation(
     return participants.includes(uid2);
   });
 
-  if (existing) return existing.id;
+  return existing ? existing.id : null;
+}
 
-  const newRef = doc(collection(db, 'conversations'));
-  const conversation: Conversation = {
-    participants: [uid1, uid2],
-    lastMessage: '',
-    lastMessageAt: null,
-    unreadCounts: { [uid1]: 0, [uid2]: 0 },
-  };
-  await setDoc(newRef, conversation);
-  return newRef.id;
+/**
+ * Finds an existing conversation or reserves a new document ID without
+ * writing to Firestore yet. The document is only created when the first
+ * message is sent via sendMessage().
+ *
+ * Returns { conversationId, isPending } where isPending=true means the
+ * Firestore document does not exist yet.
+ */
+export async function getOrCreateConversation(
+  uid1: string,
+  uid2: string,
+): Promise<{ conversationId: string; isPending: boolean }> {
+  const existingId = await findExistingConversation(uid1, uid2);
+  if (existingId) return { conversationId: existingId, isPending: false };
+
+  // Reserve an ID without writing yet — the document is created on first send.
+  return { conversationId: doc(collection(db, 'conversations')).id, isPending: true };
+}
+
+/**
+ * Ensures the conversation document exists. Called by sendMessage before
+ * writing the first message when the conversation is still pending.
+ */
+async function ensureConversationExists(
+  conversationId: string,
+  uid1: string,
+  uid2: string,
+): Promise<void> {
+  const ref = doc(db, 'conversations', conversationId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    const conversation: Conversation = {
+      participants: [uid1, uid2],
+      lastMessage: '',
+      lastMessageAt: null,
+      unreadCounts: { [uid1]: 0, [uid2]: 0 },
+    };
+    await setDoc(ref, conversation);
+  }
+}
+
+/**
+ * Deletes a conversation document if it has no messages.
+ * Safe to call on back-navigation to clean up pending/empty conversations.
+ */
+export async function deleteConversationIfEmpty(
+  conversationId: string,
+): Promise<void> {
+  const messagesSnap = await getDocs(
+    collection(db, 'conversations', conversationId, 'messages'),
+  );
+  if (messagesSnap.empty) {
+    await deleteDoc(doc(db, 'conversations', conversationId));
+  }
 }
 
 /**
@@ -95,15 +143,22 @@ export function subscribeToConversations(
 /**
  * Sends a message in a conversation and updates the conversation's
  * lastMessage preview and unread counts for the other participant.
+ * Pass isPending=true on the first message of a new conversation so the
+ * Firestore document is created atomically before the message is written.
  */
 export async function sendMessage(
   conversationId: string,
   senderId: string,
   recipientId: string,
   text: string,
+  isPending?: boolean,
 ): Promise<void> {
   const trimmed = text.trim();
   if (!trimmed) return;
+
+  if (isPending) {
+    await ensureConversationExists(conversationId, senderId, recipientId);
+  }
 
   const messagesRef = collection(db, 'conversations', conversationId, 'messages');
   await addDoc(messagesRef, {
@@ -117,21 +172,10 @@ export async function sendMessage(
   await updateDoc(conversationRef, {
     lastMessage: trimmed,
     lastMessageAt: serverTimestamp(),
-    [`unreadCounts.${recipientId}`]: (await getUnreadCount(conversationId, recipientId)) + 1,
+    [`unreadCounts.${recipientId}`]: increment(1),
   });
 }
 
-async function getUnreadCount(conversationId: string, uid: string): Promise<number> {
-  const snap = await getDocs(
-    query(
-      collection(db, 'conversations', conversationId, 'messages'),
-      where('senderId', '!=', uid),
-      where('read', '==', false),
-      limit(100),
-    ),
-  );
-  return snap.size;
-}
 
 /**
  * Real-time listener for messages in a conversation, ordered oldest-first.
