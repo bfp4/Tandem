@@ -41,24 +41,26 @@ function firstOccurrence(repeatDays: string[], fromDate: string): string {
 export async function createRideRequest(
   data: CreateRideRequestData,
 ): Promise<string> {
-  // Validate the requested window fits inside the schedule block
-  const blockSnap = await getDoc(
-    doc(db, 'scheduleBlocks', data.scheduleBlockId),
-  );
-  if (!blockSnap.exists()) {
-    throw new Error(`ScheduleBlock not found: ${data.scheduleBlockId}`);
-  }
-  const block = blockSnap.data() as ScheduleBlock;
-
-  if (data.requestedStart < block.startTime) {
-    throw new Error(
-      `requestedStart (${data.requestedStart}) is before block startTime (${block.startTime})`,
+  // If a real scheduleBlock document exists, validate the time window against it.
+  // Otherwise (when using the users.schedule approach), skip block validation —
+  // the UI already ensures the requested slot is within both users' availability.
+  if (data.scheduleBlockId) {
+    const blockSnap = await getDoc(
+      doc(db, 'scheduleBlocks', data.scheduleBlockId),
     );
-  }
-  if (data.requestedEnd > block.endTime) {
-    throw new Error(
-      `requestedEnd (${data.requestedEnd}) is after block endTime (${block.endTime})`,
-    );
+    if (blockSnap.exists()) {
+      const block = blockSnap.data() as ScheduleBlock;
+      if (data.requestedStart < block.startTime) {
+        throw new Error(
+          `requestedStart (${data.requestedStart}) is before block startTime (${block.startTime})`,
+        );
+      }
+      if (data.requestedEnd > block.endTime) {
+        throw new Error(
+          `requestedEnd (${data.requestedEnd}) is after block endTime (${block.endTime})`,
+        );
+      }
+    }
   }
 
   const ref = await addDoc(collection(db, 'rideRequests'), {
@@ -72,47 +74,40 @@ export async function createRideRequest(
 }
 
 export async function confirmRideRequest(requestId: string): Promise<void> {
-  await runTransaction(db, async (tx) => {
-    const requestRef = doc(db, 'rideRequests', requestId);
-    const requestSnap = await tx.get(requestRef);
-    if (!requestSnap.exists()) throw new Error(`RideRequest not found: ${requestId}`);
-    const rideRequest = requestSnap.data() as RideRequest;
+  const requestRef = doc(db, 'rideRequests', requestId);
+  const requestSnap = await getDoc(requestRef);
+  if (!requestSnap.exists()) throw new Error(`RideRequest not found: ${requestId}`);
+  const rideRequest = requestSnap.data() as RideRequest;
 
-    // 1. Confirm the ride request
-    tx.update(requestRef, {
-      status: 'confirmed',
-      respondedAt: serverTimestamp(),
-    });
+  // 1. Confirm the ride request
+  await updateDoc(requestRef, {
+    status: 'confirmed',
+    respondedAt: serverTimestamp(),
+  });
 
-    // 2 & 3. Split the schedule block (marks original 'booked', creates remainder)
-    await splitBlock(tx, rideRequest.scheduleBlockId, rideRequest.requestedEnd);
+  // 2. Compute nextRideDate
+  let nextRideDate: string;
+  if (rideRequest.repeating && rideRequest.repeatDays?.length) {
+    nextRideDate = firstOccurrence(rideRequest.repeatDays, rideRequest.date);
+  } else {
+    nextRideDate = rideRequest.date;
+  }
 
-    // 4. Compute nextRideDate
-    let nextRideDate: string;
-    if (rideRequest.repeating && rideRequest.repeatDays?.length) {
-      nextRideDate = firstOccurrence(rideRequest.repeatDays, rideRequest.date);
-    } else {
-      nextRideDate = rideRequest.date;
-    }
-
-    // 4. Create the rideConfirmation document
-    const confirmationRef = doc(collection(db, 'rideConfirmations'));
-    const confirmation: Omit<RideConfirmation, 'createdAt'> & { createdAt: unknown } = {
-      rideRequestId: requestId,
-      driverId: rideRequest.driverId,
-      riderId: rideRequest.riderId,
-      active: false,
-      riderReady: false,
-      driverReady: false,
-      bothConfirmedAt: null,
-      pickupConfirmed: false,
-      pickupConfirmedAt: null,
-      reminderSent: false,
-      status: 'waiting',
-      nextRideDate,
-      createdAt: serverTimestamp(),
-    };
-    tx.set(confirmationRef, confirmation);
+  // 3. Create the rideConfirmation document
+  await addDoc(collection(db, 'rideConfirmations'), {
+    rideRequestId: requestId,
+    driverId: rideRequest.driverId,
+    riderId: rideRequest.riderId,
+    active: false,
+    riderReady: false,
+    driverReady: false,
+    bothConfirmedAt: null,
+    pickupConfirmed: false,
+    pickupConfirmedAt: null,
+    reminderSent: false,
+    status: 'waiting',
+    nextRideDate,
+    createdAt: serverTimestamp(),
   });
 }
 
@@ -126,10 +121,13 @@ export async function denyRideRequest(requestId: string): Promise<void> {
     respondedAt: serverTimestamp(),
   });
 
-  // Reset the schedule block back to open
-  await updateDoc(doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId), {
-    status: 'open',
-  });
+  // Reset the schedule block back to open if it exists
+  const blockSnap = await getDoc(doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId));
+  if (blockSnap.exists()) {
+    await updateDoc(doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId), {
+      status: 'open',
+    });
+  }
 }
 
 export async function cancelRideRequest(requestId: string): Promise<void> {

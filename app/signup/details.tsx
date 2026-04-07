@@ -1,23 +1,24 @@
-import React, { useState, useRef, useCallback } from 'react';
-import {
-  StyleSheet,
-  Text,
-  View,
-  TextInput,
-  TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Image,
-  FlatList,
-} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { collection, doc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { geohashForLocation } from 'geofire-common';
+import React, { useCallback, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { auth, db, storage } from '../../config/firebase';
 
 type Role = 'driver' | 'rider';
@@ -33,6 +34,8 @@ interface FieldErrors {
 interface AddressSuggestion {
   place_id: number;
   display_name: string;
+  lat: string;
+  lon: string;
   type?: string;
   class?: string;
 }
@@ -58,6 +61,7 @@ export default function UserDetailsScreen() {
   const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
   const [addressLoading, setAddressLoading] = useState(false);
   const addressDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   const toggleRole = (role: Role) => {
     setRoles(prev =>
@@ -93,6 +97,7 @@ export default function UserDetailsScreen() {
 
   const onAddressChange = useCallback((text: string) => {
     setAddress(text);
+    setSelectedCoords(null);
     if (errors.address) setErrors(prev => ({ ...prev, address: undefined }));
     setAddressSuggestions([]);
 
@@ -125,6 +130,15 @@ export default function UserDetailsScreen() {
     setAddress(suggestion.display_name);
     setAddressSuggestions([]);
     setErrors(prev => ({ ...prev, address: undefined }));
+    const lat = parseFloat(suggestion.lat);
+    const lng = parseFloat(suggestion.lon);
+    if (!isNaN(lat) && !isNaN(lng)) {
+      setSelectedCoords({ lat, lng });
+    }
+  };
+
+  const onAddressManualChange = () => {
+    setSelectedCoords(null);
   };
 
   const validate = async (): Promise<boolean> => {
@@ -190,6 +204,10 @@ export default function UserDetailsScreen() {
 
       const email = auth.currentUser?.email ?? '';
 
+      const geohash = selectedCoords
+        ? geohashForLocation([selectedCoords.lat, selectedCoords.lng])
+        : '';
+
       await setDoc(
         doc(db, 'users', uid),
         {
@@ -209,6 +227,8 @@ export default function UserDetailsScreen() {
           fcmToken: '',
           profileComplete: false,
           missingFields: [],
+          geohash,
+          ...(selectedCoords ? { lat: selectedCoords.lat, lng: selectedCoords.lng } : {}),
           createdAt: serverTimestamp(),
           carDetails: null,
         },

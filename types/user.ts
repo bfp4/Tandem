@@ -36,6 +36,10 @@ export interface User {
   missingFields: string[];
   /** Geohash of the user's location — updated whenever address/location changes */
   geohash: string;
+  /** Latitude component of the user's base location */
+  lat?: number;
+  /** Longitude component of the user's base location */
+  lng?: number;
   createdAt: Timestamp;
   /** Driver only — null for riders */
   carDetails: {

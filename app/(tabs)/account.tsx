@@ -1,3 +1,4 @@
+import { useAuth } from '@/context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
@@ -13,13 +14,6 @@ import {
   View,
 } from 'react-native';
 import { auth, db } from '../../config/firebase';
-import { useAuth } from '../../context/AuthContext';
-
-interface TimeSlot {
-  day: string;
-  time: string;
-  available: boolean;
-}
 
 export default function AccountScreen() {
   const router = useRouter();
@@ -27,20 +21,6 @@ export default function AccountScreen() {
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
   const [loading, setLoading] = useState(false);
-  
-  const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const timeSlots = ['7:00 AM' ,'8:00 AM', '10:00 AM', '12:00 PM', '2:00 PM', '4:00 PM', '6:00 PM'];
-
-
-  const [schedule, setSchedule] = useState<TimeSlot[]>(() => {
-    const initialSchedule: TimeSlot[] = [];
-    daysOfWeek.forEach(day => {
-      timeSlots.forEach(time => {
-        initialSchedule.push({ day, time, available: false });
-      });
-    });
-    return initialSchedule;
-  });
 
   useEffect(() => {
     loadProfile();
@@ -48,56 +28,33 @@ export default function AccountScreen() {
 
   const loadProfile = async () => {
     if (!user) return;
-
     try {
-      const docRef = doc(db, 'users', user.uid);
-      const docSnap = await getDoc(docRef);
-
-      if (docSnap.exists()) {
-        const data = docSnap.data();
+      const snap = await getDoc(doc(db, 'users', user.uid));
+      if (snap.exists()) {
+        const data = snap.data();
         setName(data.name || '');
         setBio(data.bio || '');
-        if (data.schedule) {
-          setSchedule(data.schedule);
-        }
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error loading profile:', error);
     }
   };
 
   const handleSaveProfile = async () => {
     if (!user) return;
-
     setLoading(true);
     try {
-      const docRef = doc(db, 'users', user.uid);
-      await setDoc(docRef, { 
-        name: name.trim(),
-        bio: bio.trim(),
-        schedule: schedule,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-      Alert.alert('Success', 'Profile and schedule saved to Firebase!');
+      await setDoc(
+        doc(db, 'users', user.uid),
+        { name: name.trim(), bio: bio.trim(), updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+      Alert.alert('Saved', 'Profile updated successfully.');
     } catch (error: any) {
       Alert.alert('Error', error.message);
     } finally {
       setLoading(false);
     }
-  };
-
-  const toggleSlot = (day: string, time: string) => {
-    setSchedule(prevSchedule => 
-      prevSchedule.map(slot => 
-        slot.day === day && slot.time === time 
-          ? { ...slot, available: !slot.available }
-          : slot
-      )
-    );
-  };
-
-  const getSlotForDayAndTime = (day: string, time: string) => {
-    return schedule.find(slot => slot.day === day && slot.time === time);
   };
 
   const handleSignOut = async () => {
@@ -156,70 +113,14 @@ export default function AccountScreen() {
           </View>
         </View>
 
-        <View style={styles.scheduleSection}>
-          <Text style={styles.scheduleTitle}>My Availability Schedule</Text>
-          <Text style={styles.scheduleSubtitle}>Tap slots to set your available times</Text>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.scheduleGrid}>
-              <View style={styles.timeColumn}>
-                <View style={styles.dayHeaderCell} />
-                {timeSlots.map((time) => (
-                  <View key={time} style={styles.timeCell}>
-                    <Text style={styles.timeText}>{time}</Text>
-                  </View>
-                ))}
-              </View>
-
-              {daysOfWeek.map((day) => (
-                <View key={day} style={styles.dayColumn}>
-                  <View style={styles.dayHeaderCell}>
-                    <Text style={styles.dayHeaderText}>{day}</Text>
-                  </View>
-                  {timeSlots.map((time) => {
-                    const slot = getSlotForDayAndTime(day, time);
-                    return (
-                      <TouchableOpacity
-                        key={`${day}-${time}`}
-                        style={[
-                          styles.slotCell,
-                          slot?.available ? styles.slotAvailable : styles.slotUnavailable,
-                        ]}
-                        onPress={() => toggleSlot(day, time)}
-                      >
-                        {slot?.available ? (
-                          <Ionicons name="checkmark" size={20} color="#34C759" />
-                        ) : (
-                          <View style={styles.emptySlot} />
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              ))}
-            </View>
-          </ScrollView>
-
-          <View style={styles.legend}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendBox, styles.legendAvailable]} />
-              <Text style={styles.legendText}>Available</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendBox, styles.legendUnavailable]} />
-              <Text style={styles.legendText}>Unavailable</Text>
-            </View>
-          </View>
-        </View>
-
-        <TouchableOpacity 
-          style={styles.saveButton} 
+        <TouchableOpacity
+          style={[styles.saveButton, loading && styles.saveButtonDisabled]}
           onPress={handleSaveProfile}
           disabled={loading}
         >
           <Ionicons name="save" size={20} color="#fff" />
           <Text style={styles.saveButtonText}>
-            {loading ? 'Saving...' : 'Save Profile & Schedule'}
+            {loading ? 'Saving...' : 'Save Profile'}
           </Text>
         </TouchableOpacity>
 
@@ -317,6 +218,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    color: '#333',
   },
   textArea: {
     height: 100,
@@ -333,109 +235,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
   },
-  scheduleSection: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-  },
-  scheduleTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
-  },
-  scheduleSubtitle: {
-    fontSize: 13,
-    color: '#999',
-    marginBottom: 16,
-  },
-  scheduleGrid: {
-    flexDirection: 'row',
-  },
-  timeColumn: {
-    marginRight: 8,
-  },
-  dayColumn: {
-    marginRight: 4,
-  },
-  dayHeaderCell: {
-    height: 40,
-    width: 70,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    marginBottom: 6,
-  },
-  dayHeaderText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#333',
-  },
-  timeCell: {
-    height: 52,
-    width: 90,
-    justifyContent: 'center',
-    paddingRight: 8,
-    marginBottom: 6,
-  },
-  timeText: {
-    fontSize: 11,
-    color: '#666',
-    fontWeight: '500',
-    textAlign: 'right',
-  },
-  slotCell: {
-    height: 52,
-    width: 70,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 8,
-    marginBottom: 6,
-    borderWidth: 2,
-  },
-  slotAvailable: {
-    backgroundColor: '#e8f5e9',
-    borderColor: '#34C759',
-  },
-  slotUnavailable: {
-    backgroundColor: '#f5f5f5',
-    borderColor: '#e0e0e0',
-  },
-  emptySlot: {
-    width: 20,
-    height: 20,
-  },
-  legend: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 16,
-    gap: 20,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  legendBox: {
-    width: 18,
-    height: 18,
-    borderRadius: 6,
-    marginRight: 6,
-    borderWidth: 2,
-  },
-  legendAvailable: {
-    backgroundColor: '#e8f5e9',
-    borderColor: '#34C759',
-  },
-  legendUnavailable: {
-    backgroundColor: '#f5f5f5',
-    borderColor: '#e0e0e0',
-  },
-  legendText: {
-    fontSize: 13,
-    color: '#666',
-  },
   saveButton: {
     flexDirection: 'row',
     backgroundColor: '#007AFF',
@@ -444,12 +243,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
+    gap: 8,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
   },
   saveButtonText: {
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
-    marginLeft: 8,
   },
   settingsSection: {
     backgroundColor: '#fff',
