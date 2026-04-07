@@ -54,44 +54,7 @@ export default function DriverDetailsScreen() {
 
   const blocks = getBlocksByUser(id);
 
-  const [schedule] = useState<TimeSlot[]>([
-    { day: 'Mon', time: '8:00 AM', available: true, requested: false },
-    { day: 'Mon', time: '12:00 PM', available: true, requested: false },
-    { day: 'Mon', time: '2:00 PM', available: true, requested: false },
-    { day: 'Mon', time: '6:00 PM', available: true, requested: false },
-    
-    { day: 'Tue', time: '8:00 AM', available: true, requested: false },
-    { day: 'Tue', time: '10:00 AM', available: true, requested: false },
-    { day: 'Tue', time: '2:00 PM', available: true, requested: false },
-    { day: 'Tue', time: '4:00 PM', available: true, requested: false },
-    
-    { day: 'Wed', time: '10:00 AM', available: true, requested: false },
-    { day: 'Wed', time: '12:00 PM', available: true, requested: false },
-    { day: 'Wed', time: '2:00 PM', available: true, requested: false },
-    { day: 'Wed', time: '4:00 PM', available: true, requested: false },
-    { day: 'Wed', time: '6:00 PM', available: true, requested: false },
-    
-    { day: 'Thu', time: '8:00 AM', available: true, requested: false },
-    { day: 'Thu', time: '12:00 PM', available: true, requested: false },
-    { day: 'Thu', time: '4:00 PM', available: true, requested: false },
-    { day: 'Thu', time: '6:00 PM', available: true, requested: false },
-    
-    { day: 'Fri', time: '8:00 AM', available: true, requested: false },
-    { day: 'Fri', time: '10:00 AM', available: true, requested: false },
-    { day: 'Fri', time: '12:00 PM', available: true, requested: false },
-    { day: 'Fri', time: '2:00 PM', available: true, requested: false },
-    
-    { day: 'Sat', time: '10:00 AM', available: true, requested: false },
-    { day: 'Sat', time: '12:00 PM', available: true, requested: false },
-    { day: 'Sat', time: '2:00 PM', available: true, requested: false },
-    { day: 'Sat', time: '4:00 PM', available: true, requested: false },
-    { day: 'Sat', time: '6:00 PM', available: true, requested: false },
-    
-    { day: 'Sun', time: '8:00 AM', available: true, requested: false },
-    { day: 'Sun', time: '2:00 PM', available: true, requested: false },
-    { day: 'Sun', time: '4:00 PM', available: true, requested: false },
-    { day: 'Sun', time: '6:00 PM', available: true, requested: false },
-  ]);
+  const [schedule] = useState<TimeSlot[]>([]);
 
   var [scheduleCopy] = useState<TimeSlot[]>([]);
 

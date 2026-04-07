@@ -1,5 +1,4 @@
 import { useAuth } from '@/context/AuthContext';
-import { signUpWithEmail } from '@/services/authService';
 import { getOrCreateConversation } from '@/services/messagingService';
 import { getAllDrivers } from '@/services/userService';
 import { User } from '@/types';
@@ -38,10 +37,6 @@ export default function MatchScreen() {
   const [selectedRating, setSelectedRating] = useState<number | null>(null);
   const [selectedDriverType, setSelectedDriverType] = useState<string | null>(null);
 
-  const makeUsers = () => {
-      signUpWithEmail('example@email.com', 'examplePassowrd');
-  }
-
   useEffect(() => {
     loadMatches();
   }, []);
@@ -53,23 +48,18 @@ export default function MatchScreen() {
   const driverTypes = ['Quiet', 'Talkitive', 'Friendly', 'Professional'];
 
   const loadMatches = async () => {
-    makeUsers;
     const data = await getAllDrivers();
-    let sampleMatches: Match[] = [];
-    (data).forEach((element: User) => {
-        const elementData = {
-          id: element.uid,
-          name: element.name,
-          rating: element.starRating,
-          driverType: driverTypes[Math.floor((Math.random() * 100)%4)],
-          distance: 0,
-          totalRides: element.rideCount,
-          bio: element.bio
-        }
-        sampleMatches.push(elementData);
-      })
-      sampleMatches.sort((a, b) => b.rating - a.rating);
-    setMatches(sampleMatches);
+    const loaded: Match[] = (data).map((element: User) => ({
+      id: element.uid,
+      name: element.name,
+      rating: element.starRating,
+      driverType: driverTypes[Math.floor((Math.random() * 100) % 4)],
+      distance: 0,
+      totalRides: element.rideCount,
+      bio: element.bio,
+    }));
+    loaded.sort((a, b) => b.rating - a.rating);
+    setMatches(loaded);
   }
 
   const applyFilters = () => {
@@ -121,10 +111,10 @@ export default function MatchScreen() {
       return;
     }
     try {
-      const conversationId = await getOrCreateConversation(user.uid, driver.id);
+      const { conversationId, isPending } = await getOrCreateConversation(user.uid, driver.id);
       router.push({
         pathname: '/conversation/[id]',
-        params: { id: conversationId, otherUserId: driver.id },
+        params: { id: conversationId, otherUserId: driver.id, pending: isPending ? 'true' : 'false' },
       });
     } catch (e) {
       Alert.alert('Error', 'Could not open conversation. Please try again.');
