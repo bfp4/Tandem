@@ -12,6 +12,7 @@ export default function RootLayout() {
         <Stack.Screen name="signup/car-details" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="driver-details" options={{ headerShown: false }} />
+        <Stack.Screen name="conversation/[id]" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="auto" />
     </AuthProvider>

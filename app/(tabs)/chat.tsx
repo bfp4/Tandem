@@ -1,41 +1,110 @@
-import React, { useState } from 'react';
-import { 
-  StyleSheet, 
-  Text, 
-  View, 
-  FlatList, 
-  TouchableOpacity,
-} from 'react-native';
+import { useAuth } from '@/context/AuthContext';
+import { subscribeToConversations, type ConversationWithId } from '@/services/messagingService';
+import { getUser } from '@/services/userService';
+import type { User } from '@/types/user';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { Timestamp } from 'firebase/firestore';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
-interface Chat {
-  id: string;
-  name: string;
+interface ConversationRow {
+  conversationId: string;
+  otherUser: User;
+  otherUserId: string;
   lastMessage: string;
-  time: string;
+  lastMessageAt: Timestamp | null;
   unread: number;
 }
 
-export default function ChatScreen() {
-  const [chats] = useState<Chat[]>([
-    { id: '1', name: 'Alex', lastMessage: 'Hey, how are you?', time: '2m', unread: 2 },
-    { id: '2', name: 'Sam', lastMessage: 'See you tomorrow!', time: '1h', unread: 0 },
-    { id: '3', name: 'Jordan', lastMessage: 'Thanks for the help!', time: '3h', unread: 1 },
-  ]);
+function formatTime(ts: Timestamp | null): string {
+  if (!ts) return '';
+  const date = ts.toDate();
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'now';
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h`;
+  const diffDays = Math.floor(diffHr / 24);
+  return `${diffDays}d`;
+}
 
-  const renderChat = ({ item }: { item: Chat }) => (
-    <TouchableOpacity style={styles.chatCard}>
+export default function ChatScreen() {
+  const { user } = useAuth();
+  const router = useRouter();
+  const [rows, setRows] = useState<ConversationRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const userCacheRef = useRef<Record<string, User>>({});
+
+  useEffect(() => {
+    if (!user) return;
+
+    const unsub = subscribeToConversations(
+      user.uid,
+      async (conversations) => {
+        const enriched = await Promise.all(
+          conversations.map(async (conv: ConversationWithId) => {
+            const otherUserId = conv.participants.find((p) => p !== user.uid) ?? '';
+            if (!userCacheRef.current[otherUserId]) {
+              try {
+                userCacheRef.current[otherUserId] = await getUser(otherUserId);
+              } catch {
+                return null;
+              }
+            }
+            const otherUser = userCacheRef.current[otherUserId];
+            return {
+              conversationId: conv.id,
+              otherUser,
+              otherUserId,
+              lastMessage: conv.lastMessage,
+              lastMessageAt: conv.lastMessageAt,
+              unread: conv.unreadCounts?.[user.uid] ?? 0,
+            } satisfies ConversationRow;
+          }),
+        );
+        setRows(enriched.filter((r): r is ConversationRow => r !== null));
+        setLoading(false);
+      },
+      () => {
+        // Snapshot errored (e.g. permission denied) — stop the spinner
+        setLoading(false);
+      },
+    );
+
+    return unsub;
+  }, [user]);
+
+  const renderItem = ({ item }: { item: ConversationRow }) => (
+    <TouchableOpacity
+      style={styles.chatCard}
+      onPress={() =>
+        router.push({
+          pathname: '/conversation/[id]',
+          params: { id: item.conversationId, otherUserId: item.otherUserId },
+        })
+      }
+    >
       <View style={styles.avatar}>
         <Ionicons name="person" size={28} color="#999" />
       </View>
       <View style={styles.chatInfo}>
         <View style={styles.chatHeader}>
-          <Text style={styles.chatName}>{item.name}</Text>
-          <Text style={styles.chatTime}>{item.time}</Text>
+          <Text style={styles.chatName}>{item.otherUser.name}</Text>
+          <Text style={styles.chatTime}>{formatTime(item.lastMessageAt)}</Text>
         </View>
         <View style={styles.messageRow}>
           <Text style={styles.lastMessage} numberOfLines={1}>
-            {item.lastMessage}
+            {item.lastMessage || 'No messages yet'}
           </Text>
           {item.unread > 0 && (
             <View style={styles.unreadBadge}>
@@ -47,16 +116,21 @@ export default function ChatScreen() {
     </TouchableOpacity>
   );
 
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Messages</Text>
-        <TouchableOpacity>
-          <Ionicons name="add-circle" size={28} color="#007AFF" />
-        </TouchableOpacity>
       </View>
 
-      {chats.length === 0 ? (
+      {rows.length === 0 ? (
         <View style={styles.emptyState}>
           <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
           <Text style={styles.emptyText}>No messages yet</Text>
@@ -66,9 +140,9 @@ export default function ChatScreen() {
         </View>
       ) : (
         <FlatList
-          data={chats}
-          renderItem={renderChat}
-          keyExtractor={(item) => item.id}
+          data={rows}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.conversationId}
         />
       )}
     </View>
@@ -79,6 +153,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',

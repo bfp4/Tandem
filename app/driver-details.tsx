@@ -1,4 +1,6 @@
+import { useAuth } from '@/context/AuthContext';
 import { getBlocksByUser } from '@/services/scheduleBlockService';
+import { getOrCreateConversation } from '@/services/messagingService';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -23,6 +25,7 @@ interface TimeSlot {
 export default function DriverDetailsScreen() {
   var finalSchedule = getFinalSchedule();
   const router = useRouter();
+  const { user } = useAuth();
   const params = useLocalSearchParams();
   
   const id = params.id as string || 'id'
@@ -198,6 +201,26 @@ export default function DriverDetailsScreen() {
     return scheduleCopy.find(slot => slot.day === day && slot.time === time);
   };
 
+  const handleMessage = async () => {
+    if (!user) {
+      Alert.alert('Sign in required', 'You must be signed in to send messages.');
+      return;
+    }
+    if (!id || id === 'id') {
+      Alert.alert('Error', 'Unable to message this driver. Please try again later.');
+      return;
+    }
+    try {
+      const { conversationId, isPending } = await getOrCreateConversation(user.uid, id);
+      router.push({
+        pathname: '/conversation/[id]',
+        params: { id: conversationId, otherUserId: id, pending: isPending ? 'true' : 'false' },
+      });
+    } catch (e) {
+      Alert.alert('Error', 'Could not open conversation. Please try again.');
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -239,6 +262,11 @@ export default function DriverDetailsScreen() {
           </View>
 
           <Text style={styles.bioText}>{bio}</Text>
+
+          <TouchableOpacity style={styles.messageButton} onPress={handleMessage}>
+            <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
+            <Text style={styles.messageButtonText}>Message</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.scheduleSection}>
@@ -461,6 +489,21 @@ const styles = StyleSheet.create({
     color: '#666',
     lineHeight: 22,
     textAlign: 'center',
+  },
+  messageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    marginTop: 20,
+    gap: 8,
+  },
+  messageButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   scheduleSection: {
     backgroundColor: '#fff',

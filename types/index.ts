@@ -5,3 +5,5 @@ export type { PricingSnapshot, RideRequest } from './rideRequest';
 export type { RideConfirmation } from './rideConfirmation';
 export type { Rating } from './rating';
 export type { NotificationType, Notification } from './notification';
+export type { Conversation } from './conversation';
+export type { Message } from './message';
