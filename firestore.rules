@@ -39,6 +39,46 @@ service cloud.firestore {
         && request.auth.uid == request.resource.data.userId;
     }
 
+    match /rideRequests/{requestId} {
+      // List queries are scoped by the client with where('driverId'/'riderId', '==', uid)
+      allow list: if request.auth != null;
+      // Single-doc get enforces participant check
+      allow get: if request.auth != null
+        && (request.auth.uid == resource.data.driverId
+            || request.auth.uid == resource.data.riderId);
+      // Only the rider can create a ride request
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.riderId;
+      // Either party can update (driver accepts/denies, either cancels)
+      allow update: if request.auth != null
+        && (request.auth.uid == resource.data.driverId
+            || request.auth.uid == resource.data.riderId);
+    }
+
+    match /rideConfirmations/{confirmationId} {
+      // List queries are scoped by the client
+      allow list: if request.auth != null;
+      allow get: if request.auth != null
+        && (request.auth.uid == resource.data.driverId
+            || request.auth.uid == resource.data.riderId);
+      allow create: if request.auth != null
+        && (request.auth.uid == request.resource.data.driverId
+            || request.auth.uid == request.resource.data.riderId);
+      allow update: if request.auth != null
+        && (request.auth.uid == resource.data.driverId
+            || request.auth.uid == resource.data.riderId);
+    }
+
+    match /notifications/{notificationId} {
+      // List queries are scoped by the client with where('userId', '==', uid)
+      allow list: if request.auth != null;
+      allow get: if request.auth != null
+        && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null
+        && request.auth.uid == resource.data.userId;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

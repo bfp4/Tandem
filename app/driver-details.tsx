@@ -1,11 +1,18 @@
 import { useAuth } from '@/context/AuthContext';
-import { getBlocksByUser } from '@/services/scheduleBlockService';
 import { getOrCreateConversation } from '@/services/messagingService';
+import { createNotification } from '@/services/notificationService';
+import { createRideRequest } from '@/services/rideRequestService';
+import { getUser } from '@/services/userService';
+import type { User } from '@/types/user';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import { GeoPoint, doc, getDoc } from 'firebase/firestore';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
+  FlatList,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,155 +20,227 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { getFinalSchedule } from './(tabs)/history';
+import { db } from '../config/firebase';
+
+interface AddressSuggestion {
+  place_id: number;
+  display_name: string;
+  lat: string;
+  lon: string;
+}
+
+interface ResolvedLocation {
+  text: string;
+  lat: number;
+  lng: number;
+}
 
 interface TimeSlot {
   day: string;
   time: string;
   available: boolean;
-  requested: boolean;
+}
+
+const DAYS_OF_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const TIME_SLOTS = [
+  '12:00 AM','12:15 AM','12:30 AM','12:45 AM',
+  '1:00 AM','1:15 AM','1:30 AM','1:45 AM',
+  '2:00 AM','2:15 AM','2:30 AM','2:45 AM',
+  '3:00 AM','3:15 AM','3:30 AM','3:45 AM',
+  '4:00 AM','4:15 AM','4:30 AM','4:45 AM',
+  '5:00 AM','5:15 AM','5:30 AM','5:45 AM',
+  '6:00 AM','6:15 AM','6:30 AM','6:45 AM',
+  '7:00 AM','7:15 AM','7:30 AM','7:45 AM',
+  '8:00 AM','8:15 AM','8:30 AM','8:45 AM',
+  '9:00 AM','9:15 AM','9:30 AM','9:45 AM',
+  '10:00 AM','10:15 AM','10:30 AM','10:45 AM',
+  '11:00 AM','11:15 AM','11:30 AM','11:45 AM',
+  '12:00 PM','12:15 PM','12:30 PM','12:45 PM',
+  '1:00 PM','1:15 PM','1:30 PM','1:45 PM',
+  '2:00 PM','2:15 PM','2:30 PM','2:45 PM',
+  '3:00 PM','3:15 PM','3:30 PM','3:45 PM',
+  '4:00 PM','4:15 PM','4:30 PM','4:45 PM',
+  '5:00 PM','5:15 PM','5:30 PM','5:45 PM',
+  '6:00 PM','6:15 PM','6:30 PM','6:45 PM',
+  '7:00 PM','7:15 PM','7:30 PM','7:45 PM',
+  '8:00 PM','8:15 PM','8:30 PM','8:45 PM',
+  '9:00 PM','9:15 PM','9:30 PM','9:45 PM',
+  '10:00 PM','10:15 PM','10:30 PM','10:45 PM',
+  '11:00 PM','11:15 PM','11:30 PM','11:45 PM',
+];
+
+/** Returns only the time slots where both schedules are available, trimmed to the range used. */
+function getOverlapTimes(scheduleA: TimeSlot[], scheduleB: TimeSlot[]): string[] {
+  const setA = new Set(scheduleA.filter(s => s.available).map(s => `${s.day}-${s.time}`));
+  const setB = new Set(scheduleB.filter(s => s.available).map(s => `${s.day}-${s.time}`));
+  const overlap = new Set([...setA].filter(k => setB.has(k)));
+  if (overlap.size === 0) return [];
+  return TIME_SLOTS.filter(t =>
+    DAYS_OF_WEEK.some(d => overlap.has(`${d}-${t}`))
+  );
 }
 
 export default function DriverDetailsScreen() {
-  var finalSchedule = getFinalSchedule();
   const router = useRouter();
   const { user } = useAuth();
   const params = useLocalSearchParams();
-  
-  const id = params.id as string || 'id'
+
+  const driverId = params.id as string;
   const driverName = params.name as string || 'Driver';
-  const rating = parseFloat(params.rating as string) || 4.5;
+  const rating = parseFloat(params.rating as string) || 0;
   const totalRides = parseInt(params.totalRides as string) || 0;
-  const driverType = params.driverType as string || 'Friendly';
   const bio = params.bio as string || '';
   const distance = params.distance as string || '';
-  var minTimeIndex = 0;
-  var maxTimeIndex = 0;
+  const score = params.score as string || '';
+  const scheduleOverlap = params.scheduleOverlap as string || '';
 
-  const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const timeSlots = ['12:00 AM','12:15 AM','12:30 AM','12:45 AM','1:00 AM','1:15 AM','1:30 AM','1:45 AM'
-    ,'2:00 AM','2:15 AM','2:30 AM','2:45 AM','3:00 AM','3:15 AM','3:30 AM','3:45 AM'
-    ,'4:00 AM','4:15 AM','4:30 AM','4:45 AM','5:00 AM','5:15 AM','5:30 AM','5:45 AM'
-    ,'6:00 AM','6:15 AM','6:30 AM','6:45 AM','7:00 AM','7:15 AM','7:30 AM','7:45 AM'
-    ,'8:00 AM','8:15 AM','8:30 AM','8:45 AM','9:00 AM','9:15 AM','9:30 AM','9:45 AM'
-    ,'10:00 AM','10:15 AM','10:30 AM','10:45 AM','11:00 AM','11:15 AM','11:30 AM','11:45 AM'
-    ,'12:00 PM','12:15 PM','12:30 PM','12:45 PM','1:00 PM','1:15 PM','1:30 PM','1:45 PM'
-    ,'2:00 PM','2:15 PM','2:30 PM','2:45 PM','3:00 PM','3:15 PM','3:30 PM','3:45 PM'
-    ,'4:00 PM','4:15 PM','4:30 PM','4:45 PM','5:00 PM','5:15 PM','5:30 PM','5:45 PM'
-    ,'6:00 PM','6:15 PM','6:30 PM','6:45 PM','7:00 PM','7:15 PM','7:30 PM','7:45 PM'
-    ,'8:00 PM','8:15 PM','8:30 PM','8:45 PM','9:00 PM','9:15 PM','9:30 PM','9:45 PM'
-    ,'10:00 PM','10:15 PM','10:30 PM','10:45 PM','11:00 PM','11:15 PM','11:30 PM','11:45 PM'];
-
-  const blocks = getBlocksByUser(id);
-
-  const [schedule] = useState<TimeSlot[]>([]);
-
-  var [scheduleCopy] = useState<TimeSlot[]>([]);
-
-  const arrayIncludes = (element: TimeSlot) => {
-    finalSchedule = getFinalSchedule();
-      for(var i = 0; i < finalSchedule.length; i++){
-        if(finalSchedule[i].time == element.time && finalSchedule[i].day == element.day)
-          return true;
-      }
-      return false;
-  }
-
-  const remove = (array: TimeSlot[], element: TimeSlot) => {
-      let toReturn: TimeSlot[] = [];
-      for(var i = 0; i < array.length; i++){
-        if(array[i].time != element.time || array[i].day != element.day)
-          toReturn.push(element);
-      }
-      return toReturn;
-      // var indexToRemove = -1;
-      // for(var i = 0; i < array.length; i++){
-      //   if(array[i].time == element.time && array[i].day == element.day){
-      //     indexToRemove = i;
-      //     console.log("Hello");
-      //     break;
-      //   }
-      // }
-      // var toReturn = subArray(array, 0, indexToRemove);
-      // toReturn.push(subArray(array, indexToRemove + 1, array.length));
-      // return toReturn;
-  }
-
-  const findMinAndMaxTimes = (schedule: TimeSlot[]) => {
-      var minIndex = timeSlots.length;
-      var maxIndex = 0;
-      var index = 0;
-      schedule.forEach((element: TimeSlot) => {
-        if(arrayIncludes(element)){
-          index = timeSlots.indexOf(element.time);
-          if(index > maxIndex) maxIndex = index;
-          if(index < minIndex) minIndex = index;
-          scheduleCopy.push(element);
-        }
-      })
-      minTimeIndex = minIndex;
-      maxTimeIndex = maxIndex;
-  }
-
-  const subArray = (list: any[], startIndex: number, endIndex: number) => {
-      let toReturn: any[] = [];
-      for(var i = startIndex; i < endIndex; i++) toReturn.push(list[i]);
-      return toReturn;
-  }
-
-  const limitSchedule = (schedule: TimeSlot[]) => {
-      finalSchedule = getFinalSchedule()
-      for(var i = 0; i < scheduleCopy.length; i++)
-        scheduleCopy.pop();
-      findMinAndMaxTimes(schedule);
-      return subArray(timeSlots, minTimeIndex, maxTimeIndex+1);
-  }
-
+  const [driverSchedule, setDriverSchedule] = useState<TimeSlot[]>([]);
+  const [mySchedule, setMySchedule] = useState<TimeSlot[]>([]);
+  const [overlapTimes, setOverlapTimes] = useState<string[]>([]);
+  const [loadingSchedule, setLoadingSchedule] = useState(true);
 
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
   const [sideBoxVisible, setSideBoxVisible] = useState(false);
-  const [sideBoxText1, setSideBoxText1] = useState('');
-  const [sideBoxText2, setSideBoxText2] = useState('');
+  const [pickup, setPickup] = useState<ResolvedLocation | null>(null);
+  const [dropoff, setDropoff] = useState<ResolvedLocation | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Address lookup modal state
+  const [addressModalVisible, setAddressModalVisible] = useState(false);
+  const [addressModalTarget, setAddressModalTarget] = useState<'pickup' | 'dropoff'>('pickup');
+  const [addressQuery, setAddressQuery] = useState('');
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [addressLoading, setAddressLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const openAddressModal = (target: 'pickup' | 'dropoff') => {
+    setAddressModalTarget(target);
+    setAddressQuery('');
+    setAddressSuggestions([]);
+    setAddressModalVisible(true);
+  };
+
+  const onAddressQueryChange = useCallback((text: string) => {
+    setAddressQuery(text);
+    setAddressSuggestions([]);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (text.trim().length < 3) return;
+
+    debounceRef.current = setTimeout(async () => {
+      setAddressLoading(true);
+      try {
+        const encoded = encodeURIComponent(text.trim());
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&addressdetails=1&limit=6`,
+          { headers: { 'Accept-Language': 'en', 'User-Agent': 'HuberApp/1.0' } },
+        );
+        const data: AddressSuggestion[] = await res.json();
+        setAddressSuggestions(data);
+      } catch {
+        // ignore
+      } finally {
+        setAddressLoading(false);
+      }
+    }, 400);
+  }, []);
+
+  const selectSuggestion = (s: AddressSuggestion) => {
+    const resolved: ResolvedLocation = {
+      text: s.display_name,
+      lat: parseFloat(s.lat),
+      lng: parseFloat(s.lon),
+    };
+    if (addressModalTarget === 'pickup') setPickup(resolved);
+    else setDropoff(resolved);
+    setAddressModalVisible(false);
+  };
+
+  useEffect(() => {
+    loadSchedules();
+  }, [driverId, user]);
+
+  const loadSchedules = async () => {
+    if (!driverId || !user) return;
+    setLoadingSchedule(true);
+    try {
+      const [driverSnap, mySnap] = await Promise.all([
+        getDoc(doc(db, 'users', driverId)),
+        getDoc(doc(db, 'users', user.uid)),
+      ]);
+      const driverSched: TimeSlot[] = driverSnap.exists() ? (driverSnap.data().schedule ?? []) : [];
+      const mySched: TimeSlot[] = mySnap.exists() ? (mySnap.data().schedule ?? []) : [];
+      setDriverSchedule(driverSched);
+      setMySchedule(mySched);
+      setOverlapTimes(getOverlapTimes(driverSched, mySched));
+    } catch (e) {
+      console.error('Error loading schedules:', e);
+    } finally {
+      setLoadingSchedule(false);
+    }
+  };
+
+  const getSlot = (day: string, time: string): TimeSlot | undefined => {
+    const driverAvail = driverSchedule.find(s => s.day === day && s.time === time)?.available ?? false;
+    const myAvail = mySchedule.find(s => s.day === day && s.time === time)?.available ?? false;
+    return { day, time, available: driverAvail && myAvail };
+  };
 
   const handleSlotPress = (slot: TimeSlot) => {
-    if (!slot.available || slot.requested) {
-      Alert.alert('Unavailable', 'This time slot is not available');
+    if (!slot.available) {
+      Alert.alert('Unavailable', 'This time slot is not available for both of you.');
       return;
     }
-
     setSelectedSlot(slot);
-    slot.requested = true;
     setSideBoxVisible(true);
   };
 
-  const hideSideBox = () => {
-    setSideBoxVisible(false);
-  };
+  const handleRequestRide = async () => {
+    if (!selectedSlot || !user || !driverId) return;
+    if (!pickup || !dropoff) {
+      Alert.alert('Missing info', 'Please select both a pickup and drop-off location.');
+      return;
+    }
 
-  const confirmRideRequest = (selectedSlot: TimeSlot) => {
-    if(!selectedSlot) return;
-    setSideBoxVisible(false);
+    setSubmitting(true);
+    try {
+      const timeIndex = TIME_SLOTS.indexOf(selectedSlot.time);
+      const endIndex = Math.min(timeIndex + 4, TIME_SLOTS.length - 1);
+      const requestedStart = to24Hour(selectedSlot.time);
+      const requestedEnd = to24Hour(TIME_SLOTS[endIndex]);
+      const rideDate = getNextDateForDay(selectedSlot.day);
 
-    // if (!selectedSlot) return;
-    // Alert.alert(
-    //   'Request Ride',
-    //   `Request a ride with ${driverName} on ${selectedSlot.day} at ${selectedSlot.time}?`,
-    //   [
-    //     { text: 'Cancel', style: 'cancel' },
-    //     {
-    //       text: 'Request',
-    //       onPress: () => {
-            setSelectedSlot(selectedSlot)
-            selectedSlot.requested = true;
-    //         Alert.alert('Success', `Ride requested for ${selectedSlot.day} at ${selectedSlot.time}`);
-    //       },
-    //     },
-    //   ]
-    // );
-  };
+      const requestId = await createRideRequest({
+        scheduleBlockId: `${driverId}_${selectedSlot.day}_${selectedSlot.time}`,
+        driverId,
+        riderId: user.uid,
+        requestedStart,
+        requestedEnd,
+        date: rideDate,
+        pickupLocation: new GeoPoint(pickup.lat, pickup.lng),
+        dropoffLocation: new GeoPoint(dropoff.lat, dropoff.lng),
+        repeating: false,
+        repeatDays: null,
+        repeatEndsAt: null,
+        seriesId: null,
+      });
 
-  const getSlotForDayAndTime = (day: string, time: string) => {
-    return scheduleCopy.find(slot => slot.day === day && slot.time === time);
+      await createNotification(
+        driverId,
+        'ride_requested',
+        requestId,
+        `You have a new ride request from ${user.displayName || 'a rider'} for ${selectedSlot.day} at ${selectedSlot.time}.`,
+      );
+
+      setSideBoxVisible(false);
+      setPickup(null);
+      setDropoff(null);
+      setSelectedSlot(null);
+      Alert.alert('Request sent!', `Your ride request for ${selectedSlot.day} at ${selectedSlot.time} has been sent to ${driverName}.`);
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'Could not send ride request. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleMessage = async () => {
@@ -169,17 +248,13 @@ export default function DriverDetailsScreen() {
       Alert.alert('Sign in required', 'You must be signed in to send messages.');
       return;
     }
-    if (!id || id === 'id') {
-      Alert.alert('Error', 'Unable to message this driver. Please try again later.');
-      return;
-    }
     try {
-      const { conversationId, isPending } = await getOrCreateConversation(user.uid, id);
+      const { conversationId, isPending } = await getOrCreateConversation(user.uid, driverId);
       router.push({
         pathname: '/conversation/[id]',
-        params: { id: conversationId, otherUserId: id, pending: isPending ? 'true' : 'false' },
+        params: { id: conversationId, otherUserId: driverId, pending: isPending ? 'true' : 'false' },
       });
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Could not open conversation. Please try again.');
     }
   };
@@ -199,32 +274,47 @@ export default function DriverDetailsScreen() {
           <View style={styles.avatarLarge}>
             <Ionicons name="person" size={48} color="#999" />
           </View>
-          
+
           <Text style={styles.driverName}>{driverName}</Text>
-          
+
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Ionicons name="star" size={20} color="#FFB800" />
-              <Text style={styles.statValue}>{rating}</Text>
+              <Ionicons name="star" size={18} color="#FFB800" />
+              <Text style={styles.statValue}>{rating.toFixed(1)}</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Ionicons name="car" size={20} color="#666" />
+              <Ionicons name="car" size={18} color="#666" />
               <Text style={styles.statValue}>{totalRides} rides</Text>
             </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Ionicons name="location" size={20} color="#666" />
-              <Text style={styles.statValue}>{distance}</Text>
+            {distance ? (
+              <>
+                <View style={styles.statDivider} />
+                <View style={styles.statItem}>
+                  <Ionicons name="location" size={18} color="#666" />
+                  <Text style={styles.statValue}>{distance} mi</Text>
+                </View>
+              </>
+            ) : null}
+            {score ? (
+              <>
+                <View style={styles.statDivider} />
+                <View style={styles.statItem}>
+                  <Ionicons name="checkmark-circle" size={18} color="#007AFF" />
+                  <Text style={[styles.statValue, { color: '#007AFF' }]}>{score}% match</Text>
+                </View>
+              </>
+            ) : null}
+          </View>
+
+          {scheduleOverlap ? (
+            <View style={styles.overlapBadge}>
+              <Ionicons name="time" size={14} color="#34C759" />
+              <Text style={styles.overlapBadgeText}>{scheduleOverlap}% schedule overlap</Text>
             </View>
-          </View>
+          ) : null}
 
-          <View style={styles.driverTypeBadge}>
-            <Ionicons name="volume-medium" size={16} color="#666" />
-            <Text style={styles.driverTypeText}>{driverType}</Text>
-          </View>
-
-          <Text style={styles.bioText}>{bio}</Text>
+          {bio ? <Text style={styles.bioText}>{bio}</Text> : null}
 
           <TouchableOpacity style={styles.messageButton} onPress={handleMessage}>
             <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
@@ -233,131 +323,217 @@ export default function DriverDetailsScreen() {
         </View>
 
         <View style={styles.scheduleSection}>
-          <Text style={styles.sectionTitle}>Weekly Schedule</Text>
-          <Text style={styles.sectionSubtitle}>Select a time to request a ride</Text>
+          <Text style={styles.sectionTitle}>Shared Availability</Text>
+          <Text style={styles.sectionSubtitle}>
+            {overlapTimes.length > 0
+              ? 'Green slots are times you both are available — tap one to request a ride'
+              : 'No overlapping availability found. Update your schedule to find common times.'}
+          </Text>
 
-          <View style={styles.scheduleRow}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.scheduleScroll}
-              contentContainerStyle={styles.scheduleScrollContent}
-            >
-              <View style={styles.scheduleGrid}>
-                <View style={styles.timeColumn}>
-                  <View style={styles.dayHeaderCell} />
-                  {limitSchedule(schedule).map((time) => (
-                    <View key={time} style={styles.timeCell}>
-                      <Text style={styles.timeText}>{time}</Text>
+          {loadingSchedule ? (
+            <ActivityIndicator color="#007AFF" style={{ marginVertical: 24 }} />
+          ) : (
+            <View style={styles.scheduleRow}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.scheduleScroll}
+              >
+                <View style={styles.scheduleGrid}>
+                  <View style={styles.timeColumn}>
+                    <View style={styles.dayHeaderCell} />
+                    {overlapTimes.map(time => (
+                      <View key={time} style={styles.timeCell}>
+                        <Text style={styles.timeText}>{time}</Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  {DAYS_OF_WEEK.map(day => (
+                    <View key={day} style={styles.dayColumn}>
+                      <View style={styles.dayHeaderCell}>
+                        <Text style={styles.dayHeaderText}>{day}</Text>
+                      </View>
+                      {overlapTimes.map(time => {
+                        const slot = getSlot(day, time);
+                        const isSelected = selectedSlot?.day === day && selectedSlot?.time === time;
+                        return (
+                          <TouchableOpacity
+                            key={`${day}-${time}`}
+                            style={[
+                              styles.slotCell,
+                              slot?.available ? styles.slotAvailable : styles.slotUnavailable,
+                              isSelected && styles.slotSelected,
+                            ]}
+                            onPress={() => slot && handleSlotPress(slot)}
+                          >
+                            {slot?.available ? (
+                              <Ionicons name={isSelected ? 'checkmark-circle' : 'checkmark'} size={16} color="#34C759" />
+                            ) : (
+                              <Ionicons name="close" size={14} color="#ccc" />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
                   ))}
                 </View>
+              </ScrollView>
 
-                {daysOfWeek.map((day) => (
-                  <View key={day} style={styles.dayColumn}>
-                    <View style={styles.dayHeaderCell}>
-                      <Text style={styles.dayHeaderText}>{day}</Text>
-                    </View>
-                    {limitSchedule(schedule).map((time) => {
-                      const slot = getSlotForDayAndTime(day, time);
-                      return (
-                        <TouchableOpacity
-                          key={`${day}-${time}`}
-                          style={[
-                            styles.slotCell,
-                            slot?.available ? styles.slotAvailable : styles.slotUnavailable,
-                            selectedSlot?.day === day && selectedSlot?.time === time && styles.slotSelected,
-                          slot?.requested && styles.slotRequested
-                          ]}
-                          onPress={() => slot && handleSlotPress(slot)}
-                          
-                      >
-                          {slot?.available && !slot.requested ? (
-                            <Ionicons name="checkmark" size={20} color="#34C759" />
-                          ) : slot?.requested ? (
-                          <Ionicons name="hourglass" size={20} color="#FF9800" />
-                        ) : (
-                            <Ionicons name="close" size={20} color="#ccc" />
-                          )}
-                        </TouchableOpacity>
-                      );
-                    })}
+              {sideBoxVisible && selectedSlot && (
+                <View style={styles.sideBox}>
+                  <View style={styles.sideBoxHeader}>
+                    <Text style={styles.sideBoxTitle} numberOfLines={2}>
+                      {selectedSlot.day} · {selectedSlot.time}
+                    </Text>
+                    <TouchableOpacity onPress={() => setSideBoxVisible(false)}>
+                      <Ionicons name="close" size={20} color="#666" />
+                    </TouchableOpacity>
                   </View>
-                ))}
-              </View>
-            </ScrollView>
 
-            {sideBoxVisible && (
-              <View style={styles.scheduleSideBox}>
-                <View style={styles.scheduleSideBoxHeader}>
-                  <Text style={styles.scheduleSideBoxTitle} numberOfLines={2}>
-                    {selectedSlot
-                      ? `${selectedSlot.day} · ${selectedSlot.time}`
-                      : 'Ride details'}
-                  </Text>
+                  <Text style={styles.sideLabel}>Pickup location</Text>
                   <TouchableOpacity
-                    onPress={hideSideBox}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    accessibilityLabel="Close details panel"
+                    style={styles.locationPickerButton}
+                    onPress={() => openAddressModal('pickup')}
                   >
-                    <Ionicons name="close" size={22} color="#666" />
+                    <Ionicons name="location" size={14} color={pickup ? '#34C759' : '#999'} />
+                    <Text
+                      style={[styles.locationPickerText, pickup && styles.locationPickerTextSet]}
+                      numberOfLines={2}
+                    >
+                      {pickup ? pickup.text : 'Tap to search address'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <Text style={[styles.sideLabel, { marginTop: 8 }]}>Drop-off location</Text>
+                  <TouchableOpacity
+                    style={styles.locationPickerButton}
+                    onPress={() => openAddressModal('dropoff')}
+                  >
+                    <Ionicons name="location" size={14} color={dropoff ? '#34C759' : '#999'} />
+                    <Text
+                      style={[styles.locationPickerText, dropoff && styles.locationPickerTextSet]}
+                      numberOfLines={2}
+                    >
+                      {dropoff ? dropoff.text : 'Tap to search address'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.requestButton, submitting && styles.requestButtonDisabled]}
+                    onPress={handleRequestRide}
+                    disabled={submitting}
+                  >
+                    {submitting ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.requestButtonText}>Request ride</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
+              )}
+            </View>
+          )}
 
-                <Text style={styles.sideInputLabel}>Pickup location</Text>
-                <TextInput
-                  style={styles.sideTextInput}
-                  placeholder="Insert pickup location"
-                  placeholderTextColor="#999"
-                  value={sideBoxText1}
-                  onChangeText={setSideBoxText1}
-                  multiline
-                />
-
-                <Text style={[styles.sideInputLabel, styles.sideInputLabelSecond]}>
-                  Drop off location
-                </Text>
-                <TextInput
-                  style={styles.sideTextInput}
-                  placeholder="Insert Drop off location"
-                  placeholderTextColor="#999"
-                  value={sideBoxText2}
-                  onChangeText={setSideBoxText2}
-                  multiline
-                />
-
-                <TouchableOpacity
-                  style={styles.sideBoxRequestButton}
-                  // onPress={() => slot && handleSlotPress(slot)}
-                  onPress={() => selectedSlot && confirmRideRequest(selectedSlot)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.sideBoxRequestButtonText}>Request ride</Text>
-                </TouchableOpacity>
+          {!loadingSchedule && overlapTimes.length > 0 && (
+            <View style={styles.legend}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendBox, styles.legendAvailable]} />
+                <Text style={styles.legendText}>Both available</Text>
               </View>
-            )}
-          </View>
-
-          <View style={styles.legend}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendBox, styles.legendAvailable]} />
-              <Text style={styles.legendText}>Available</Text>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendBox, styles.legendUnavailable]} />
+                <Text style={styles.legendText}>Not available</Text>
+              </View>
             </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendBox, styles.legendUnavailable]} />
-              <Text style={styles.legendText}>Unavailable</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendBox, styles.legendRequested]} />
-              <Text style={styles.legendText}>Requested</Text>
-            </View>
-          </View>
+          )}
         </View>
 
-        <View style={styles.bottomPadding} />
+        <View style={{ height: 32 }} />
       </ScrollView>
+
+      {/* Address lookup modal */}
+      <Modal
+        visible={addressModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setAddressModalVisible(false)}
+      >
+        <View style={styles.addressModalOverlay}>
+          <View style={styles.addressModalContent}>
+            <View style={styles.addressModalHeader}>
+              <Text style={styles.addressModalTitle}>
+                {addressModalTarget === 'pickup' ? 'Pickup location' : 'Drop-off location'}
+              </Text>
+              <TouchableOpacity onPress={() => setAddressModalVisible(false)}>
+                <Ionicons name="close" size={26} color="#333" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.addressSearchBar}>
+              <Ionicons name="search" size={18} color="#999" />
+              <TextInput
+                style={styles.addressSearchInput}
+                placeholder="Search for an address..."
+                placeholderTextColor="#999"
+                value={addressQuery}
+                onChangeText={onAddressQueryChange}
+                autoFocus
+              />
+              {addressLoading && <ActivityIndicator size="small" color="#007AFF" />}
+            </View>
+
+            <FlatList
+              data={addressSuggestions}
+              keyExtractor={item => String(item.place_id)}
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={
+                addressQuery.length >= 3 && !addressLoading ? (
+                  <Text style={styles.addressEmptyText}>No results found</Text>
+                ) : null
+              }
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.addressSuggestionItem}
+                  onPress={() => selectSuggestion(item)}
+                >
+                  <Ionicons name="location-outline" size={18} color="#007AFF" />
+                  <Text style={styles.addressSuggestionText} numberOfLines={2}>
+                    {item.display_name}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
+}
+
+/** Returns the "YYYY-MM-DD" of the next occurrence of a day name (e.g. "Mon"). If today is that day, returns today. */
+function getNextDateForDay(dayName: string): string {
+  const DAY_INDICES: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const targetDow = DAY_INDICES[dayName];
+  const now = new Date();
+  const currentDow = now.getDay();
+  let daysAhead = targetDow - currentDow;
+  if (daysAhead < 0) daysAhead += 7;
+  const target = new Date(now);
+  target.setDate(now.getDate() + daysAhead);
+  return target.toISOString().slice(0, 10);
+}
+
+/** Converts "7:30 AM" → "07:30", "12:00 PM" → "12:00", "1:00 PM" → "13:00" */
+function to24Hour(time12: string): string {
+  const [timePart, period] = time12.split(' ');
+  let [hours, minutes] = timePart.split(':').map(Number);
+  if (period === 'AM') {
+    if (hours === 12) hours = 0;
+  } else {
+    if (hours !== 12) hours += 12;
+  }
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
 const styles = StyleSheet.create({
@@ -406,52 +582,55 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   driverName: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
   },
   statItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
+    gap: 4,
   },
   statValue: {
     fontSize: 14,
     fontWeight: '600',
     color: '#333',
-    marginLeft: 6,
   },
   statDivider: {
     width: 1,
-    height: 20,
+    height: 18,
     backgroundColor: '#e0e0e0',
   },
-  driverTypeBadge: {
+  overlapBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    backgroundColor: '#e8f5e9',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 16,
-    marginBottom: 16,
+    marginBottom: 12,
+    gap: 6,
   },
-  driverTypeText: {
-    fontSize: 14,
+  overlapBadgeText: {
+    fontSize: 13,
     fontWeight: '600',
-    color: '#666',
-    marginLeft: 6,
+    color: '#34C759',
   },
   bioText: {
     fontSize: 15,
     color: '#666',
     lineHeight: 22,
     textAlign: 'center',
+    marginBottom: 4,
   },
   messageButton: {
     flexDirection: 'row',
@@ -460,7 +639,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 28,
-    marginTop: 20,
+    marginTop: 16,
     gap: 8,
   },
   messageButtonText: {
@@ -474,15 +653,16 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   sectionTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 4,
   },
   sectionSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#999',
-    marginBottom: 20,
+    marginBottom: 16,
+    lineHeight: 18,
   },
   scheduleRow: {
     flexDirection: 'row',
@@ -490,10 +670,6 @@ const styles = StyleSheet.create({
   },
   scheduleScroll: {
     flex: 1,
-    minWidth: 0,
-  },
-  scheduleScrollContent: {
-    flexGrow: 1,
   },
   scheduleGrid: {
     flexDirection: 'row',
@@ -505,40 +681,40 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   dayHeaderCell: {
-    height: 40,
-    width: 70,
+    height: 36,
+    width: 66,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f8f9fa',
     borderRadius: 8,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   dayHeaderText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: '#333',
   },
   timeCell: {
-    height: 30,
-    width: 90,
+    height: 28,
+    width: 88,
     justifyContent: 'center',
     paddingRight: 8,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   timeText: {
-    fontSize: 12,
+    fontSize: 10,
     color: '#666',
     fontWeight: '500',
     textAlign: 'right',
   },
   slotCell: {
-    height: 30,
-    width: 70,
+    height: 28,
+    width: 66,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 8,
-    marginBottom: 6,
-    borderWidth: 2,
+    borderRadius: 6,
+    marginBottom: 4,
+    borderWidth: 1.5,
   },
   slotAvailable: {
     backgroundColor: '#e8f5e9',
@@ -549,29 +725,25 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0',
   },
   slotSelected: {
-    backgroundColor: '#FFF3E0',
-    borderColor: '#FF9800',
-  },
-  slotRequested: {
-    backgroundColor: '#FFF3E0',
-    borderColor: '#FF9800',
+    backgroundColor: '#d0f0db',
+    borderColor: '#28a745',
   },
   legend: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 20,
-    gap: 24,
+    marginTop: 16,
+    gap: 20,
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   legendBox: {
-    width: 20,
-    height: 20,
-    borderRadius: 6,
-    marginRight: 8,
-    borderWidth: 2,
+    width: 16,
+    height: 16,
+    borderRadius: 4,
+    marginRight: 6,
+    borderWidth: 1.5,
   },
   legendAvailable: {
     backgroundColor: '#e8f5e9',
@@ -581,71 +753,129 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     borderColor: '#e0e0e0',
   },
-  legendRequested: {
-    backgroundColor: '#FFF3E0',
-    borderColor: '#FF9800',
-  },
   legendText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#666',
   },
-  scheduleSideBox: {
-    width: 168,
-    marginRight: 500,
+  sideBox: {
+    width: 160,
+    marginLeft: 8,
     padding: 12,
     backgroundColor: '#f8f9fa',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
-  scheduleSideBoxHeader: {
+  sideBoxHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: 8,
+    alignItems: 'flex-start',
     marginBottom: 10,
+    gap: 4,
   },
-  scheduleSideBoxTitle: {
+  sideBoxTitle: {
     flex: 1,
     fontSize: 13,
     fontWeight: '700',
     color: '#333',
   },
-  sideInputLabel: {
+  sideLabel: {
     fontSize: 11,
     fontWeight: '600',
     color: '#666',
     marginBottom: 4,
   },
-  sideInputLabelSecond: {
-    marginTop: 8,
-  },
-  sideTextInput: {
-    minHeight: 56,
-    maxHeight: 88,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 12,
-    color: '#333',
+  locationPickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#fff',
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#e0e0e0',
-    textAlignVertical: 'top',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    gap: 6,
   },
-  sideBoxRequestButton: {
-    marginTop: 12,
+  locationPickerText: {
+    flex: 1,
+    fontSize: 11,
+    color: '#999',
+  },
+  locationPickerTextSet: {
+    color: '#333',
+  },
+  requestButton: {
+    marginTop: 10,
     paddingVertical: 10,
     borderRadius: 8,
     backgroundColor: '#007AFF',
     alignItems: 'center',
   },
-  sideBoxRequestButtonText: {
+  requestButtonDisabled: {
+    opacity: 0.6,
+  },
+  requestButtonText: {
     fontSize: 13,
     fontWeight: '600',
     color: '#fff',
   },
-  bottomPadding: {
-    height: 32,
+  addressModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  addressModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  addressModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  addressModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  addressSearchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 44,
+    marginBottom: 12,
+    gap: 8,
+  },
+  addressSearchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: '#333',
+  },
+  addressEmptyText: {
+    textAlign: 'center',
+    color: '#999',
+    fontSize: 14,
+    paddingVertical: 24,
+  },
+  addressSuggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    gap: 10,
+  },
+  addressSuggestionText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
   },
 });

@@ -1,11 +1,13 @@
 import { useAuth } from '@/context/AuthContext';
-import { getOrCreateConversation } from '@/services/messagingService';
-import { getAllDrivers } from '@/services/userService';
-import { User } from '@/types';
+import { getMatchedUsers, type MatchResult } from '@/services/matchingService';
+import { getUser } from '@/services/userService';
+import type { User } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Modal,
@@ -17,141 +19,166 @@ import {
   View,
 } from 'react-native';
 
-interface Match {
-  id: string;
-  name: string;
-  distance: number;
-  rating: number;
-  totalRides: number;
-  driverType: string;
-  bio: string;
-}
+const DISTANCE_STEPS = [5, 10, 15, 25, 50, 100];
 
 export default function MatchScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [filteredMatches, setFilteredMatches] = useState<Match[]>([]);
+
+  const [results, setResults] = useState<MatchResult[]>([]);
+  const [filteredResults, setFilteredResults] = useState<MatchResult[]>([]);
+  const [currentUserProfile, setCurrentUserProfile] = useState<User | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedRating, setSelectedRating] = useState<number | null>(null);
-  const [selectedDriverType, setSelectedDriverType] = useState<string | null>(null);
+  const [maxDistance, setMaxDistance] = useState(25);
+  const [loading, setLoading] = useState(true);
+  const [hasLocation, setHasLocation] = useState(false);
+  const locationRef = useRef<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
-    loadMatches();
+    init();
   }, []);
 
   useEffect(() => {
     applyFilters();
-  }, [searchQuery, selectedRating, selectedDriverType, matches]);
+  }, [searchQuery, selectedRating, results]);
 
-  const driverTypes = ['Quiet', 'Talkitive', 'Friendly', 'Professional'];
+  const init = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
-  const loadMatches = async () => {
-    const data = await getAllDrivers();
-    const loaded: Match[] = (data).map((element: User) => ({
-      id: element.uid,
-      name: element.name,
-      rating: element.starRating,
-      driverType: driverTypes[Math.floor((Math.random() * 100) % 4)],
-      distance: 0,
-      totalRides: element.rideCount,
-      bio: element.bio,
-    }));
-    loaded.sort((a, b) => b.rating - a.rating);
-    setMatches(loaded);
-  }
+    let profile: User | null = null;
+    try {
+      profile = await getUser(user.uid);
+      setCurrentUserProfile(profile);
+    } catch {
+      Alert.alert('Error', 'Could not load your profile.');
+      setLoading(false);
+      return;
+    }
+
+    // Try to get location with a 6-second timeout — don't block matching if it fails.
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const locPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000));
+        const loc = await Promise.race([locPromise, timeoutPromise]);
+        if (loc && 'coords' in loc) {
+          locationRef.current = { lat: loc.coords.latitude, lng: loc.coords.longitude };
+          setHasLocation(true);
+        }
+      }
+    } catch {
+      // Location unavailable — continue without it
+    }
+
+    // Load matches regardless of whether location succeeded
+    await runLoadMatches(profile, locationRef.current);
+  };
+
+  const runLoadMatches = async (
+    profile: User | null,
+    location: { lat: number; lng: number } | null,
+  ) => {
+    if (!profile) return;
+    setLoading(true);
+    try {
+      const role = profile.activeRole === 'driver' ? 'rider' : 'driver';
+      const matched = await getMatchedUsers(
+        profile as any,
+        location?.lat ?? null,
+        location?.lng ?? null,
+        role,
+        maxDistance,
+      );
+      setResults(matched);
+    } catch (e) {
+      console.error('Error loading matches:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMatches = useCallback(async () => {
+    await runLoadMatches(currentUserProfile, locationRef.current);
+  }, [currentUserProfile, maxDistance]);
 
   const applyFilters = () => {
-    let filtered = [...matches];
+    let filtered = [...results];
 
     if (searchQuery) {
-      filtered = filtered.filter(match => 
-        match.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        match.driverType.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        match.bio.toLowerCase().includes(searchQuery.toLowerCase())
+      filtered = filtered.filter(r =>
+        r.user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        r.user.bio?.toLowerCase().includes(searchQuery.toLowerCase()),
       );
     }
 
-    if (selectedRating) {
-      filtered = filtered.filter(match => match.rating >= selectedRating);
+    if (selectedRating !== null) {
+      filtered = filtered.filter(r => r.user.starRating >= selectedRating);
     }
 
-    if (selectedDriverType) {
-      filtered = filtered.filter(match => match.driverType === selectedDriverType);
-    }
-
-    setFilteredMatches(filtered);
+    setFilteredResults(filtered);
   };
 
   const clearFilters = () => {
     setSelectedRating(null);
-    setSelectedDriverType(null);
     setShowFilters(false);
   };
 
-  const handleViewMore = (driver: Match) => {
+  const handleViewMore = (result: MatchResult) => {
     router.push({
       pathname: '../driver-details' as any,
       params: {
-        id: driver.id,
-        name: driver.name,
-        rating: driver.rating.toString(),
-        totalRides: driver.totalRides.toString(),
-        driverType: driver.driverType,
-        bio: driver.bio,
-        distance: driver.distance,
-      }
+        id: result.user.uid,
+        name: result.user.name,
+        rating: result.user.starRating.toString(),
+        totalRides: result.user.rideCount.toString(),
+        bio: result.user.bio ?? '',
+        distance: result.distanceMiles.toFixed(1),
+        score: Math.round(result.score * 100).toString(),
+        scheduleOverlap: result.scheduleOverlapPercent.toString(),
+      },
     });
   };
 
-  const handleMessage = async (driver: Match) => {
-    if (!user) {
-      Alert.alert('Sign in required', 'You must be signed in to send messages.');
-      return;
-    }
-    try {
-      const { conversationId, isPending } = await getOrCreateConversation(user.uid, driver.id);
-      router.push({
-        pathname: '/conversation/[id]',
-        params: { id: conversationId, otherUserId: driver.id, pending: isPending ? 'true' : 'false' },
-      });
-    } catch (e) {
-      Alert.alert('Error', 'Could not open conversation. Please try again.');
-    }
-  };
-
-  const renderMatch = ({ item }: { item: Match }) => (
+  const renderMatch = ({ item }: { item: MatchResult }) => (
     <View style={styles.matchCard}>
       <View style={styles.matchHeader}>
         <View style={styles.avatar}>
           <Ionicons name="person" size={32} color="#999" />
         </View>
         <View style={styles.matchInfo}>
-          <Text style={styles.matchName}>{item.name}</Text>
+          <Text style={styles.matchName}>{item.user.name}</Text>
           <View style={styles.ratingRow}>
             <Ionicons name="star" size={14} color="#FFB800" />
-            <Text style={styles.rating}>{item.rating}</Text>
-            <Text style={styles.rideCount}>({item.totalRides} rides)</Text>
+            <Text style={styles.rating}>{item.user.starRating.toFixed(1)}</Text>
+            <Text style={styles.rideCount}>({item.user.rideCount} rides)</Text>
           </View>
-          <Text style={styles.matchDetail}>
-            <Ionicons name="location" size={12} color="#666" /> {item.distance}
-          </Text>
+          <View style={styles.detailRow}>
+            <Ionicons name="location" size={12} color="#666" />
+            <Text style={styles.detailText}>
+              {item.distanceMiles < 0.1 ? 'Nearby' : `${item.distanceMiles.toFixed(1)} mi away`}
+            </Text>
+            <Text style={styles.separator}>·</Text>
+            <Ionicons name="time" size={12} color="#666" />
+            <Text style={styles.detailText}>{item.scheduleOverlapPercent}% schedule match</Text>
+          </View>
+        </View>
+        <View style={styles.scoreContainer}>
+          <Text style={styles.scoreValue}>{Math.round(item.score * 100)}%</Text>
+          <Text style={styles.scoreLabel}>match</Text>
         </View>
       </View>
 
-      <View style={styles.driverTypeBadge}>
-        <Ionicons name="volume-medium" size={14} color="#666" />
-        <Text style={styles.driverTypeText}>{item.driverType}</Text>
-      </View>
-
-      <Text style={styles.bio} numberOfLines={2}>{item.bio}</Text>
+      {item.user.bio ? (
+        <Text style={styles.bio} numberOfLines={2}>{item.user.bio}</Text>
+      ) : null}
 
       <View style={styles.cardActions}>
-        <TouchableOpacity style={styles.messageButton} onPress={() => handleMessage(item)}>
-          <Ionicons name="chatbubble-ellipses" size={16} color="#007AFF" />
-          <Text style={styles.messageButtonText}>Message</Text>
-        </TouchableOpacity>
         <TouchableOpacity style={styles.viewMoreButton} onPress={() => handleViewMore(item)}>
           <Text style={styles.viewMoreButtonText}>View More</Text>
           <Ionicons name="chevron-forward" size={20} color="#007AFF" />
@@ -160,10 +187,24 @@ export default function MatchScreen() {
     </View>
   );
 
+  const roleLookingFor = currentUserProfile?.activeRole === 'driver' ? 'Riders' : 'Drivers';
+  const filtersActive = selectedRating !== null || maxDistance !== 25;
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Find Drivers</Text>
+        <Text style={styles.headerTitle}>Find {roleLookingFor}</Text>
+        {hasLocation ? (
+          <View style={styles.locationBadge}>
+            <Ionicons name="navigate" size={12} color="#34C759" />
+            <Text style={styles.locationBadgeText}>Using your location</Text>
+          </View>
+        ) : (
+          <View style={styles.locationBadge}>
+            <Ionicons name="navigate-outline" size={12} color="#999" />
+            <Text style={[styles.locationBadgeText, { color: '#999' }]}>Location unavailable — showing all</Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.searchSection}>
@@ -171,7 +212,7 @@ export default function MatchScreen() {
           <Ionicons name="search" size={20} color="#999" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search for a driver..."
+            placeholder={`Search ${roleLookingFor.toLowerCase()}...`}
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholderTextColor="#999"
@@ -183,30 +224,32 @@ export default function MatchScreen() {
           ) : null}
         </View>
 
-        <TouchableOpacity 
-          style={[
-            styles.filterIconButton, 
-            (selectedRating || selectedDriverType) ? styles.filterActiveButton : null
-          ]} 
+        <TouchableOpacity
+          style={[styles.filterIconButton, filtersActive && styles.filterActiveButton]}
           onPress={() => setShowFilters(true)}
         >
-          <Ionicons name="options" size={24} color={(selectedRating || selectedDriverType) ? '#fff' : '#007AFF'} />
+          <Ionicons name="options" size={24} color={filtersActive ? '#fff' : '#007AFF'} />
         </TouchableOpacity>
       </View>
 
-      {filteredMatches.length === 0 ? (
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>Finding matches near you...</Text>
+        </View>
+      ) : filteredResults.length === 0 ? (
         <View style={styles.emptyState}>
           <Ionicons name="people-outline" size={64} color="#ccc" />
           <Text style={styles.emptyText}>No matches found</Text>
           <Text style={styles.emptySubtext}>
-            Try adjusting your search or filters
+            Try increasing the distance filter or check back later
           </Text>
         </View>
       ) : (
         <FlatList
-          data={filteredMatches}
+          data={filteredResults}
           renderItem={renderMatch}
-          keyExtractor={(item) => item.id}
+          keyExtractor={item => item.user.uid}
           contentContainerStyle={styles.listContent}
         />
       )}
@@ -214,7 +257,7 @@ export default function MatchScreen() {
       <Modal
         visible={showFilters}
         animationType="slide"
-        transparent={true}
+        transparent
         onRequestClose={() => setShowFilters(false)}
       >
         <View style={styles.modalOverlay}>
@@ -228,23 +271,18 @@ export default function MatchScreen() {
 
             <ScrollView>
               <View style={styles.filterSection}>
-                <Text style={styles.filterLabel}>Minimum Rating</Text>
-                <View style={styles.ratingFilters}>
-                  {[4.0, 4.5, 4.8, 5.0].map((rating) => (
+                <Text style={styles.filterLabel}>
+                  Max Distance: <Text style={styles.filterValue}>{maxDistance} mi</Text>
+                </Text>
+                <View style={styles.distanceChips}>
+                  {DISTANCE_STEPS.map(d => (
                     <TouchableOpacity
-                      key={rating}
-                      style={[
-                        styles.filterChip,
-                        selectedRating === rating && styles.filterChipActive
-                      ]}
-                      onPress={() => setSelectedRating(selectedRating === rating ? null : rating)}
+                      key={d}
+                      style={[styles.filterChip, maxDistance === d && styles.filterChipActive]}
+                      onPress={() => setMaxDistance(d)}
                     >
-                      <Ionicons name="star" size={16} color={selectedRating === rating ? '#fff' : '#FFB800'} />
-                      <Text style={[
-                        styles.filterChipText,
-                        selectedRating === rating && styles.filterChipTextActive
-                      ]}>
-                        {rating}+
+                      <Text style={[styles.filterChipText, maxDistance === d && styles.filterChipTextActive]}>
+                        {d} mi
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -252,22 +290,17 @@ export default function MatchScreen() {
               </View>
 
               <View style={styles.filterSection}>
-                <Text style={styles.filterLabel}>Driver Type</Text>
-                <View style={styles.typeFilters}>
-                  {['Quiet', 'Talkative', 'Friendly', 'Professional'].map((type) => (
+                <Text style={styles.filterLabel}>Minimum Rating</Text>
+                <View style={styles.ratingFilters}>
+                  {[4.0, 4.5, 4.8, 5.0].map(rating => (
                     <TouchableOpacity
-                      key={type}
-                      style={[
-                        styles.typeChip,
-                        selectedDriverType === type && styles.typeChipActive
-                      ]}
-                      onPress={() => setSelectedDriverType(selectedDriverType === type ? null : type)}
+                      key={rating}
+                      style={[styles.filterChip, selectedRating === rating && styles.filterChipActive]}
+                      onPress={() => setSelectedRating(selectedRating === rating ? null : rating)}
                     >
-                      <Text style={[
-                        styles.typeChipText,
-                        selectedDriverType === type && styles.typeChipTextActive
-                      ]}>
-                        {type}
+                      <Ionicons name="star" size={14} color={selectedRating === rating ? '#fff' : '#FFB800'} />
+                      <Text style={[styles.filterChipText, selectedRating === rating && styles.filterChipTextActive]}>
+                        {rating}+
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -279,9 +312,12 @@ export default function MatchScreen() {
               </TouchableOpacity>
             </ScrollView>
 
-            <TouchableOpacity 
-              style={styles.applyButton} 
-              onPress={() => setShowFilters(false)}
+            <TouchableOpacity
+              style={styles.applyButton}
+              onPress={() => {
+                setShowFilters(false);
+                loadMatches();
+              }}
             >
               <Text style={styles.applyButtonText}>Apply Filters</Text>
             </TouchableOpacity>
@@ -308,6 +344,17 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: '#333',
+  },
+  locationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 4,
+  },
+  locationBadgeText: {
+    fontSize: 12,
+    color: '#34C759',
+    fontWeight: '500',
   },
   searchSection: {
     flexDirection: 'row',
@@ -343,6 +390,16 @@ const styles = StyleSheet.create({
   filterActiveButton: {
     backgroundColor: '#007AFF',
   },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 15,
+    color: '#999',
+  },
   listContent: {
     padding: 16,
   },
@@ -353,19 +410,19 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 2,
   },
   matchHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
+    alignItems: 'flex-start',
+    marginBottom: 10,
   },
   avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
@@ -375,7 +432,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   matchName: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '600',
     color: '#333',
     marginBottom: 4,
@@ -396,25 +453,37 @@ const styles = StyleSheet.create({
     color: '#999',
     marginLeft: 4,
   },
-  matchDetail: {
-    fontSize: 13,
-    color: '#666',
-  },
-  driverTypeBadge: {
+  detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: '#f0f0f0',
+    gap: 4,
+  },
+  detailText: {
+    fontSize: 12,
+    color: '#666',
+  },
+  separator: {
+    fontSize: 12,
+    color: '#ccc',
+    marginHorizontal: 2,
+  },
+  scoreContainer: {
+    alignItems: 'center',
+    backgroundColor: '#f0f7ff',
+    borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 12,
-    marginBottom: 10,
+    marginLeft: 8,
   },
-  driverTypeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
-    marginLeft: 4,
+  scoreValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#007AFF',
+  },
+  scoreLabel: {
+    fontSize: 10,
+    color: '#007AFF',
+    fontWeight: '500',
   },
   bio: {
     fontSize: 14,
@@ -426,29 +495,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
-  messageButton: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#007AFF',
-    gap: 6,
-  },
-  messageButtonText: {
-    color: '#007AFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
   viewMoreButton: {
     flex: 1,
     flexDirection: 'row',
     backgroundColor: '#f0f7ff',
     borderRadius: 12,
-    padding: 14,
+    padding: 12,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -456,7 +508,7 @@ const styles = StyleSheet.create({
   },
   viewMoreButtonText: {
     color: '#007AFF',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     marginRight: 4,
   },
@@ -510,6 +562,14 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 12,
   },
+  filterValue: {
+    color: '#007AFF',
+  },
+  distanceChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   ratingFilters: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -524,6 +584,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    gap: 4,
   },
   filterChipActive: {
     backgroundColor: '#007AFF',
@@ -533,34 +594,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#333',
-    marginLeft: 6,
   },
   filterChipTextActive: {
-    color: '#fff',
-  },
-  typeFilters: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  typeChip: {
-    backgroundColor: '#f5f5f5',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  typeChipActive: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  typeChipText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  typeChipTextActive: {
     color: '#fff',
   },
   clearFiltersButton: {
