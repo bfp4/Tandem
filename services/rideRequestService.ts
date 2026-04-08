@@ -1,5 +1,4 @@
 import { db } from '@/config/firebase';
-import type { RideConfirmation } from '@/types/rideConfirmation';
 import type { RideRequest } from '@/types/rideRequest';
 import type { ScheduleBlock } from '@/types/scheduleBlock';
 import type { User } from '@/types/user';
@@ -142,53 +141,56 @@ export async function denyRideRequest(requestId: string): Promise<void> {
   }
 }
 
-export async function cancelRideRequest(requestId: string): Promise<void> {
+export async function cancelRideRequest(
+  requestId: string,
+  cancelledByUserId?: string,
+): Promise<void> {
+  const confirmationsSnap = await getDocs(
+    query(
+      collection(db, 'rideConfirmations'),
+      where('rideRequestId', '==', requestId),
+    ),
+  );
+  const confirmationRefs = confirmationsSnap.docs.map((d) => d.ref);
+
   await runTransaction(db, async (tx) => {
     const requestRef = doc(db, 'rideRequests', requestId);
     const requestSnap = await tx.get(requestRef);
     if (!requestSnap.exists()) throw new Error(`RideRequest not found: ${requestId}`);
     const rideRequest = requestSnap.data() as RideRequest;
 
-    // 1. Cancel the ride request
     tx.update(requestRef, { status: 'cancelled' });
 
-    // 2. Reset schedule block to open if it was booked
     const blockRef = doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId);
     const blockSnap = await tx.get(blockRef);
     if (blockSnap.exists() && blockSnap.data()?.status === 'booked') {
       tx.update(blockRef, { status: 'open' });
     }
 
-    // 3. Delete the rideConfirmation if one exists
-    const confirmationsSnap = await getDocs(
-      query(
-        collection(db, 'rideConfirmations'),
-        where('rideRequestId', '==', requestId),
-      ),
-    );
-    for (const confirmDoc of confirmationsSnap.docs) {
-      const confirmation = confirmDoc.data() as RideConfirmation;
-
-      // Notify the other party before deleting if the window is already active
-      if (confirmation.active) {
-        const cancelledBy = rideRequest.riderId; // caller context unknown here; notify other party
-        const otherUserId =
-          cancelledBy === rideRequest.riderId
-            ? rideRequest.driverId
-            : rideRequest.riderId;
-        // Notification is written outside the transaction to avoid mixing getDocs + writes
-        // The deletion happens in the transaction; notification is best-effort after.
-        await createNotification(
-          otherUserId,
-          'ride_cancelled',
-          requestId,
-          'Your ride has been cancelled.',
-        );
+    for (const ref of confirmationRefs) {
+      const snap = await tx.get(ref);
+      if (snap.exists()) {
+        tx.delete(ref);
       }
-
-      tx.delete(confirmDoc.ref);
     }
   });
+
+  if (confirmationRefs.length > 0) {
+    const requestSnap = await getDoc(doc(db, 'rideRequests', requestId));
+    if (requestSnap.exists()) {
+      const rideRequest = requestSnap.data() as RideRequest;
+      const otherUserId =
+        cancelledByUserId === rideRequest.driverId
+          ? rideRequest.riderId
+          : rideRequest.driverId;
+      await createNotification(
+        otherUserId,
+        'ride_cancelled',
+        requestId,
+        'Your ride has been cancelled.',
+      );
+    }
+  }
 }
 
 export async function getRideRequestsForDriver(
