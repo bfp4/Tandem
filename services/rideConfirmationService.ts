@@ -6,12 +6,20 @@ import {
   addDoc,
   runTransaction,
   serverTimestamp,
+  query,
+  where,
+  onSnapshot,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import type { RideConfirmation } from '@/types/rideConfirmation';
 import type { RideRequest } from '@/types/rideRequest';
 import type { HistoryBlock } from '@/types/historyBlock';
 import { createNotification } from './notificationService';
+
+export interface RideConfirmationWithId extends RideConfirmation {
+  id: string;
+}
 
 const DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
@@ -35,6 +43,9 @@ export async function markReady(
   confirmationId: string,
   role: 'driver' | 'rider',
 ): Promise<void> {
+  let notifyUserId: string | null = null;
+  let notifyRideRequestId: string | null = null;
+
   await runTransaction(db, async (tx) => {
     const confirmRef = doc(db, 'rideConfirmations', confirmationId);
     const confirmSnap = await tx.get(confirmRef);
@@ -43,40 +54,34 @@ export async function markReady(
     }
     const confirmation = confirmSnap.data() as RideConfirmation;
 
-    if (!confirmation.active) {
-      throw new Error(
-        'Cannot mark ready: the 30-minute window has not opened yet.',
-      );
-    }
-
     const update: Record<string, unknown> = {};
     if (role === 'driver') update.driverReady = true;
     if (role === 'rider') update.riderReady = true;
 
-    const driverReady =
-      role === 'driver' ? true : confirmation.driverReady;
-    const riderReady =
-      role === 'rider' ? true : confirmation.riderReady;
+    const driverReady = role === 'driver' ? true : confirmation.driverReady;
+    const riderReady = role === 'rider' ? true : confirmation.riderReady;
 
     if (driverReady && riderReady) {
       update.bothConfirmedAt = serverTimestamp();
       update.status = 'both_ready';
+    } else {
+      // Capture who to notify — the write happens after the transaction
+      notifyUserId = role === 'driver' ? confirmation.riderId : confirmation.driverId;
+      notifyRideRequestId = confirmation.rideRequestId;
     }
 
     tx.update(confirmRef, update);
-
-    // Notify the other party if only one side is ready
-    if (!(driverReady && riderReady)) {
-      const otherUserId =
-        role === 'driver' ? confirmation.riderId : confirmation.driverId;
-      await createNotification(
-        otherUserId,
-        'other_side_ready',
-        confirmation.rideRequestId,
-        `Your ${role} is ready — tap to confirm your pickup.`,
-      );
-    }
   });
+
+  // Fire notification after the transaction has committed
+  if (notifyUserId && notifyRideRequestId) {
+    await createNotification(
+      notifyUserId,
+      'other_side_ready',
+      notifyRideRequestId,
+      `Your ${role} is ready — tap to confirm your pickup.`,
+    );
+  }
 }
 
 export async function confirmPickup(confirmationId: string): Promise<void> {
@@ -192,4 +197,93 @@ export async function completeRide(confirmationId: string): Promise<void> {
       nextRideDate,
     });
   }
+}
+
+export async function getConfirmationById(
+  confirmationId: string,
+): Promise<RideConfirmationWithId | null> {
+  const snap = await getDoc(doc(db, 'rideConfirmations', confirmationId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...(snap.data() as RideConfirmation) };
+}
+
+/**
+ * Real-time listener for all ride confirmations involving a user (as driver or rider)
+ * that are in an active lifecycle state (waiting, both_ready, in_progress).
+ *
+ * Firestore doesn't support OR across different fields in one query, so we run
+ * two parallel listeners and merge/deduplicate results.
+ */
+export function subscribeToUserConfirmations(
+  userId: string,
+  onUpdate: (confirmations: RideConfirmationWithId[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  const ACTIVE_STATUSES: RideConfirmation['status'][] = [
+    'waiting',
+    'both_ready',
+    'in_progress',
+  ];
+
+  let driverResults: RideConfirmationWithId[] = [];
+  let riderResults: RideConfirmationWithId[] = [];
+
+  function merge() {
+    const map = new Map<string, RideConfirmationWithId>();
+    for (const c of [...driverResults, ...riderResults]) {
+      map.set(c.id, c);
+    }
+    onUpdate([...map.values()]);
+  }
+
+  const driverQuery = query(
+    collection(db, 'rideConfirmations'),
+    where('driverId', '==', userId),
+    where('status', 'in', ACTIVE_STATUSES),
+  );
+
+  const riderQuery = query(
+    collection(db, 'rideConfirmations'),
+    where('riderId', '==', userId),
+    where('status', 'in', ACTIVE_STATUSES),
+  );
+
+  const unsubDriver = onSnapshot(
+    driverQuery,
+    (snap) => {
+      driverResults = snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as RideConfirmation),
+      }));
+      merge();
+    },
+    (error) => {
+      console.error('subscribeToUserConfirmations (driver) error:', error);
+      driverResults = [];
+      merge();
+      onError?.(error);
+    },
+  );
+
+  const unsubRider = onSnapshot(
+    riderQuery,
+    (snap) => {
+      riderResults = snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as RideConfirmation),
+      }));
+      merge();
+    },
+    (error) => {
+      console.error('subscribeToUserConfirmations (rider) error:', error);
+      riderResults = [];
+      merge();
+      onError?.(error);
+    },
+  );
+
+  return () => {
+    unsubDriver();
+    unsubRider();
+  };
 }
