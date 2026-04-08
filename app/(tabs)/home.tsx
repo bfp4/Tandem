@@ -123,12 +123,12 @@ function HomeScreenInner() {
   const [enrichedRides, setEnrichedRides] = useState<EnrichedRide[]>([]);
   const [actingOn, setActingOn] = useState<string | null>(null);
   const [myProfile, setMyProfile] = useState<AppUser | null>(null);
-
   const [activeRoute, setActiveRoute] = useState<RouteData | null>(null);
 
   const requestCache = useRef(new Map<string, RideRequestWithId>());
   const userCache = useRef(new Map<string, AppUser>());
   const addressCache = useRef(new Map<string, string>());
+  const navigatedToRideRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -264,6 +264,21 @@ function HomeScreenInner() {
     );
   }, [active]);
 
+  // Auto-navigate to ride screen when an in_progress ride is detected
+  useEffect(() => {
+    const inProgress = active.find((r) => r.confirmation.status === 'in_progress');
+    if (!inProgress) {
+      navigatedToRideRef.current = null;
+      return;
+    }
+    if (navigatedToRideRef.current === inProgress.confirmation.id) return;
+    navigatedToRideRef.current = inProgress.confirmation.id;
+    router.push({
+      pathname: '/ride/[id]',
+      params: { id: inProgress.confirmation.id },
+    });
+  }, [active, router]);
+
   const myRole: 'driver' | 'rider' | null = useMemo(() => {
     if (!myProfile) return null;
     return myProfile.activeRole;
@@ -285,6 +300,11 @@ function HomeScreenInner() {
     setActingOn(ride.confirmation.id);
     try {
       await confirmPickup(ride.confirmation.id);
+      navigatedToRideRef.current = ride.confirmation.id;
+      router.push({
+        pathname: '/ride/[id]',
+        params: { id: ride.confirmation.id },
+      });
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Could not confirm pickup.');
     } finally {
