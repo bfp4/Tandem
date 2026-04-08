@@ -18,6 +18,10 @@ import {
 import { createNotification } from './notificationService';
 import { splitBlock } from './scheduleBlockService';
 
+export interface RideRequestWithId extends RideRequest {
+  id: string;
+}
+
 type CreateRideRequestData = Omit<
   RideRequest,
   'requestedAt' | 'respondedAt' | 'pricingSnapshot' | 'status'
@@ -36,6 +40,14 @@ function firstOccurrence(repeatDays: string[], fromDate: string): string {
   }
   // Should never reach here if repeatDays is non-empty
   throw new Error('No matching repeat day found within 7 days');
+}
+
+export async function getRideRequestById(
+  requestId: string,
+): Promise<RideRequestWithId | null> {
+  const snap = await getDoc(doc(db, 'rideRequests', requestId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...(snap.data() as RideRequest) };
 }
 
 export async function createRideRequest(

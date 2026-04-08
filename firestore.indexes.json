@@ -7,6 +7,22 @@
         { "fieldPath": "roles", "arrayConfig": "CONTAINS" },
         { "fieldPath": "geohash", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "rideConfirmations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "driverId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rideConfirmations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "riderId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
