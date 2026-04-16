@@ -122,6 +122,35 @@ function formatDuration(minutes: number): string {
   return `${m} min`;
 }
 
+function getDistanceMeters(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number }
+): number {
+  const R = 6371e3;
+  const φ1 = (from.latitude * Math.PI) / 180;
+  const φ2 = (to.latitude * Math.PI) / 180;
+  const Δφ = ((to.latitude - from.latitude) * Math.PI) / 180;
+  const Δλ = ((to.longitude - from.longitude) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) ** 2 +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+function formatDistance(meters: number | null): string {
+  if (meters == null) return '—';
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
+function estimateETA(minutes: number | null): string {
+  if (minutes == null) return '—';
+  return `${Math.round(minutes)} min`;
+}
+
+
 interface RidePricingInfoProps {
   request: RideRequestWithId;
 }
@@ -215,12 +244,15 @@ function HomeScreenInner() {
   const [actingOn, setActingOn] = useState<string | null>(null);
   const [myProfile, setMyProfile] = useState<AppUser | null>(null);
   const [activeRoute, setActiveRoute] = useState<RouteData | null>(null);
+  const [distanceToDropoff, setDistanceToDropoff] = useState<number | null>(null);
+const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
 
   const requestCache = useRef(new Map<string, RideRequestWithId>());
   const userCache = useRef(new Map<string, AppUser>());
   const addressCache = useRef(new Map<string, string>());
   const navigatedToRideRef = useRef<string | null>(null);
   const userLocation = useUserLocation();
+  
 
   useEffect(() => {
     if (!user) return;
@@ -345,23 +377,42 @@ function HomeScreenInner() {
         return { upcoming: up, active: act };
       }, [enrichedRides]);
     
+// Calculate the distance as rider moves towards the dropoff location with eta calculation
+useEffect(() => {
+  if (!userLocation || active.length === 0) {
+    setActiveRoute(null);
+    setDistanceToDropoff(null);
+    setEtaMinutes(null);
+    return;
+  }
 
-  useEffect(() => {
-    if (active.length === 0) {
-      setActiveRoute(null);
-      return;
-    }
-    const first = active[0];
-    const pickup = geoPointToLatLng(first.request.pickupLocation);
-    const dropoff = geoPointToLatLng(first.request.dropoffLocation);
-    if (!pickup || !dropoff) {
-      setActiveRoute(null);
-      return;
-    }
-    fetchRoute(pickup, dropoff).then((coords) =>
-      setActiveRoute({ coordinates: coords }),
-    );
-  }, [active]);
+  const ride = active[0];
+  const dropoff = geoPointToLatLng(ride.request.dropoffLocation);
+
+  if (!dropoff) {
+    setActiveRoute(null);
+    setDistanceToDropoff(null);
+    setEtaMinutes(null);
+    return;
+  }
+
+  // ✅ 1. Update route
+  fetchRoute(userLocation, dropoff).then((coords) =>
+    setActiveRoute({ coordinates: coords })
+  );
+
+  // ✅ 2. Calculate straight-line distance
+  const distance = getDistanceMeters(userLocation, dropoff);
+  setDistanceToDropoff(distance);
+
+  // ✅ 3. Estimate ETA (assume ~35 mph average)
+  const speedMetersPerMin = 35 * 1609 / 60;
+  const eta = distance / speedMetersPerMin;
+
+  setEtaMinutes(eta);
+}, [userLocation, active]);
+
+
 
   // Auto-navigate to ride screen when an in_progress ride is detected
   useEffect(() => {
@@ -563,6 +614,13 @@ function HomeScreenInner() {
                 </View>
               </View>
 
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <Ionicons name="navigate-outline" size={14} color="#6B7280" />
+                <Text style={{ fontSize: 13, color: '#6B7280', fontWeight: '500' }}>
+                  {formatDistance(distanceToDropoff)} • {estimateETA(etaMinutes)} away
+                </Text>
+              </View>
+
               <TouchableOpacity
                 style={styles.profileRow}
                 onPress={() => handleViewProfile(ride.otherUser)}
@@ -677,9 +735,9 @@ function HomeScreenInner() {
       },
     });
 
-    <ViewScheduleButton onPress={() => router.push('/driver-details')} />
+    
     return (      
-      
+      <><ViewScheduleButton onPress={() => router.push('/driver-details')} />
       <ScrollView style={styles.upcomingList} contentContainerStyle={styles.upcomingContent} showsVerticalScrollIndicator={false}>
         <UpcomingMapSection upcoming={upcoming} userLocation={userLocation} />
         {upcoming.map((ride) => {
@@ -777,7 +835,7 @@ function HomeScreenInner() {
             </View>
           );
         })}
-      </ScrollView>
+      </ScrollView></>
     );
   };
 
