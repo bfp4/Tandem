@@ -95,6 +95,14 @@ export default function ScheduleScreen() {
     request: RideRequestWithId;
   } | null>(null);
 
+  const [formDay, setFormDay] = useState(DAYS_OF_WEEK[0]);
+  const [formTime, setFormTime] = useState(TIME_SLOTS[0]);
+  const [formAvailability, setFormAvailability] = useState<'available' | 'unavailable'>('available');
+  const [showForm, setShowForm] = useState(false);
+  const [showDayDropdown, setShowDayDropdown] = useState(false);
+  const [showTimeDropdown, setShowTimeDropdown] = useState(false);
+  const [showAvailabilityDropdown, setShowAvailabilityDropdown] = useState(false);
+
   useEffect(() => {
     loadAll();
   }, [user]);
@@ -269,6 +277,17 @@ export default function ScheduleScreen() {
     }
   };
 
+  const handleApplyForm = () => {
+    setSchedule(prev =>
+      prev.map(s =>
+        s.day === formDay && s.time === formTime
+          ? { ...s, available: formAvailability === 'available' }
+          : s
+      )
+    );
+    Alert.alert('Slot updated', `${formDay} at ${formTime} is now ${formAvailability}.`);
+  };
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -292,6 +311,116 @@ export default function ScheduleScreen() {
 
       <ScrollView>
         <View style={styles.scheduleSection}>
+          <View style={styles.quickAddHeader}>
+            <Text style={styles.scheduleTitle}>Quick Add Slot</Text>
+            <TouchableOpacity
+              style={styles.toggleFormButton}
+              onPress={() => setShowForm(!showForm)}
+            >
+              <Ionicons
+                name={showForm ? 'chevron-up' : 'chevron-down'}
+                size={22}
+                color="#007AFF"
+              />
+            </TouchableOpacity>
+          </View>
+
+          {showForm && (
+            <View style={styles.formContainer}>
+              <View style={styles.formRow}>
+                <Text style={styles.formLabel}>Day</Text>
+                <TouchableOpacity
+                  style={styles.dropdown}
+                  onPress={() => setShowDayDropdown(!showDayDropdown)}
+                >
+                  <Text style={styles.dropdownText}>{formDay}</Text>
+                  <Ionicons name="chevron-down" size={18} color="#666" />
+                </TouchableOpacity>
+              </View>
+              {showDayDropdown && (
+                <View style={styles.dropdownMenu}>
+                  {DAYS_OF_WEEK.map(d => (
+                    <TouchableOpacity
+                      key={d}
+                      style={styles.dropdownItem}
+                      onPress={() => {
+                        setFormDay(d);
+                        setShowDayDropdown(false);
+                      }}
+                    >
+                      <Text style={styles.dropdownItemText}>{d}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              <View style={styles.formRow}>
+                <Text style={styles.formLabel}>Time</Text>
+                <TouchableOpacity
+                  style={styles.dropdown}
+                  onPress={() => setShowTimeDropdown(!showTimeDropdown)}
+                >
+                  <Text style={styles.dropdownText}>{formTime}</Text>
+                  <Ionicons name="chevron-down" size={18} color="#666" />
+                </TouchableOpacity>
+              </View>
+              {showTimeDropdown && (
+                <ScrollView style={styles.dropdownMenu} nestedScrollEnabled>
+                  {TIME_SLOTS.map(t => (
+                    <TouchableOpacity
+                      key={t}
+                      style={styles.dropdownItem}
+                      onPress={() => {
+                        setFormTime(t);
+                        setShowTimeDropdown(false);
+                      }}
+                    >
+                      <Text style={styles.dropdownItemText}>{t}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+
+              <View style={styles.formRow}>
+                <Text style={styles.formLabel}>Availability</Text>
+                <TouchableOpacity
+                  style={styles.dropdown}
+                  onPress={() => setShowAvailabilityDropdown(!showAvailabilityDropdown)}
+                >
+                  <Text style={styles.dropdownText}>{formAvailability}</Text>
+                  <Ionicons name="chevron-down" size={18} color="#666" />
+                </TouchableOpacity>
+              </View>
+              {showAvailabilityDropdown && (
+                <View style={styles.dropdownMenu}>
+                  <TouchableOpacity
+                    style={styles.dropdownItem}
+                    onPress={() => {
+                      setFormAvailability('available');
+                      setShowAvailabilityDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownItemText}>available</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dropdownItem}
+                    onPress={() => {
+                      setFormAvailability('unavailable');
+                      setShowAvailabilityDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownItemText}>unavailable</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              <TouchableOpacity style={styles.applyButton} onPress={handleApplyForm}>
+                <Ionicons name="add-circle" size={20} color="#fff" />
+                <Text style={styles.applyButtonText}>Apply</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <Text style={styles.scheduleTitle}>My Availability</Text>
           <Text style={styles.scheduleSubtitle}>
             Tap a slot to toggle availability. Orange = pending request. Blue = booked ride.
@@ -623,6 +752,83 @@ const styles = StyleSheet.create({
   legendText: {
     fontSize: 12,
     color: '#666',
+  },
+  quickAddHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  toggleFormButton: {
+    padding: 4,
+  },
+  formContainer: {
+    marginBottom: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  formRow: {
+    marginBottom: 12,
+  },
+  formLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 6,
+  },
+  dropdown: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  dropdownText: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+  },
+  dropdownMenu: {
+    maxHeight: 200,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  dropdownItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  dropdownItemText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  applyButton: {
+    flexDirection: 'row',
+    backgroundColor: '#34C759',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  applyButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
   saveButton: {
     flexDirection: 'row',

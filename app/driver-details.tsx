@@ -749,7 +749,7 @@ const styles = StyleSheet.create({
   },
   slotCell: {
     height: 28,
-    width: 66,
+    width: 156,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 6,
