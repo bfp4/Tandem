@@ -1,10 +1,12 @@
 import React, { useEffect, useRef } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
+
 
 let NativeMapView: any;
 let Marker: any;
 let Polyline: any;
 let PROVIDER_GOOGLE: any;
+let Callout: any;
 
 if (Platform.OS !== 'web') {
   const Maps = require('react-native-maps');
@@ -12,6 +14,8 @@ if (Platform.OS !== 'web') {
   Marker = Maps.Marker;
   Polyline = Maps.Polyline;
   PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
+  const Callout = Maps.Callout;  
+  
 }
 
 export interface MarkerData {
@@ -20,6 +24,8 @@ export interface MarkerData {
   title?: string;
   description?: string;
   color?: string;
+  isUserLocation?: boolean;
+  calloutLines?: string[]; 
 }
 
 export interface RouteData {
@@ -194,14 +200,35 @@ export default function Map(props: MapComponentProps) {
         initialRegion={region}
       >
         {markers.map((marker, index) => (
-          <Marker
-            key={index}
-            coordinate={{ latitude: marker.latitude, longitude: marker.longitude }}
-            title={marker.title}
-            description={marker.description}
-            pinColor={marker.color || 'red'}
-          />
-        ))}
+  <Marker
+    key={index}
+    coordinate={{ latitude: marker.latitude, longitude: marker.longitude }}
+    pinColor={marker.color}
+  >
+    {marker.isUserLocation && (
+      <View style={{
+        width: 18, height: 18, borderRadius: 9,
+        backgroundColor: '#007AFF',
+        borderWidth: 3, borderColor: '#fff',
+        shadowColor: '#000', shadowOpacity: 0.3,
+        shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
+      }} />
+    )}
+    {marker.calloutLines && marker.calloutLines.length > 0 && (
+      <Callout tooltip={false}>
+        <View style={{ padding: 8, maxWidth: 200 }}>
+          {marker.calloutLines.map((line, i) => (
+            <Text key={i} style={{ fontSize: 12, color: '#1C1C1E', marginBottom: 2 }}>
+              {line}
+            </Text>
+          ))}
+        </View>
+      </Callout>
+    )}
+  </Marker>
+))}
+
+
         {route.coordinates.length >= 2 && (
           <Polyline
             coordinates={route.coordinates}

@@ -1,18 +1,19 @@
 import { useAuth } from '@/context/AuthContext';
+import { getOrCreateConversation } from '@/services/messagingService';
 import {
-  confirmPickup,
   completeRide,
+  confirmPickup,
   markReady,
   subscribeToUserConfirmations,
   type RideConfirmationWithId,
 } from '@/services/rideConfirmationService';
-import { getOrCreateConversation } from '@/services/messagingService';
 import { getRideRequestById, type RideRequestWithId } from '@/services/rideRequestService';
 import { getUser } from '@/services/userService';
 import type { User as AppUser } from '@/types/user';
 import { reverseGeocode } from '@/utils/geocoding';
 import { fetchRoute } from '@/utils/routing';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import React, { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
@@ -25,6 +26,7 @@ import {
   View,
 } from 'react-native';
 import MapView, { type MarkerData, type RouteData } from '../../components/Map';
+
 
 class HomeErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false };
@@ -64,6 +66,11 @@ interface EnrichedRide {
   dropoffAddress: string;
 }
 
+interface UpcomingMapSectionProps {
+  upcoming: EnrichedRide[];
+  userLocation: { latitude: number; longitude: number } | null;
+}
+
 const ACCENT = '#007AFF';
 const GREEN = '#34C759';
 const ORANGE = '#FF9500';
@@ -97,6 +104,90 @@ function formatDate(dateStr: string): string {
   });
 }
 
+/** Returns the duration in minutes between two "HH:MM" strings. */
+function getRideDurationMinutes(start: string, end: string): number {
+  if (!start || !end) return 0;
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  return (eh * 60 + em) - (sh * 60 + sm);
+}
+
+/** Formats a minute count as "X hr Y min" or just "Y min". */
+function formatDuration(minutes: number): string {
+  if (minutes <= 0) return '—';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0 && m > 0) return `${h} hr ${m} min`;
+  if (h > 0) return `${h} hr`;
+  return `${m} min`;
+}
+
+interface RidePricingInfoProps {
+  request: RideRequestWithId;
+}
+
+function RidePricingInfo({ request }: RidePricingInfoProps) {
+  const duration = getRideDurationMinutes(
+    request.requestedStart,
+    request.requestedEnd,
+  );
+  const price = request.pricingSnapshot?.totalPrice;
+
+  return (
+    <View style={pricingStyles.row}>
+      <View style={pricingStyles.item}>
+        <Ionicons name="time-outline" size={14} color="#6B7280" />
+        <Text style={pricingStyles.label}>Duration</Text>
+        <Text style={pricingStyles.value}>{formatDuration(duration)}</Text>
+      </View>
+      <View style={pricingStyles.divider} />
+      <View style={pricingStyles.item}>
+        <Ionicons name="cash-outline" size={14} color="#6B7280" />
+        <Text style={pricingStyles.label}>Fare</Text>
+        <Text style={pricingStyles.value}>
+          {price != null ? `$${price.toFixed(2)}` : '—'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+const pricingStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 10,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  item: {
+    flex: 1,
+    flexDirection: 'column',
+    alignItems: 'center',
+    paddingVertical: 8,
+    gap: 2,
+  },
+  divider: {
+    width: 1,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 8,
+  },
+  label: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontWeight: '500',
+  },
+  value: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1C1C1E',
+  },
+});
+
+
+
+
+
 function formatTime24to12(hhmm: string): string {
   if (!hhmm || !hhmm.includes(':')) return hhmm ?? '';
   const [h, m] = hhmm.split(':').map(Number);
@@ -129,6 +220,7 @@ function HomeScreenInner() {
   const userCache = useRef(new Map<string, AppUser>());
   const addressCache = useRef(new Map<string, string>());
   const navigatedToRideRef = useRef<string | null>(null);
+  const userLocation = useUserLocation();
 
   useEffect(() => {
     if (!user) return;
@@ -235,17 +327,24 @@ function HomeScreenInner() {
   }, [confirmations, enrichRides]);
 
   const { upcoming, active } = useMemo(() => {
-    const up: EnrichedRide[] = [];
-    const act: EnrichedRide[] = [];
-    for (const ride of enrichedRides) {
-      if (ride.confirmation.status === 'waiting') {
-        up.push(ride);
-      } else {
-        act.push(ride);
-      }
-    }
-    return { upcoming: up, active: act };
-  }, [enrichedRides]);
+        const up: EnrichedRide[] = [];
+        const act: EnrichedRide[] = [];
+        for (const ride of enrichedRides) {
+          // A ride is "active" only when the server has unlocked it
+          // (within 30 min of pickup) OR it is already in progress.
+          const isActive =
+            ride.confirmation.active === true ||
+            ride.confirmation.status === 'in_progress' ||
+            ride.confirmation.status === 'both_ready';
+          if (isActive) {
+            act.push(ride);
+          } else {
+            up.push(ride);
+          }
+        }
+        return { upcoming: up, active: act };
+      }, [enrichedRides]);
+    
 
   useEffect(() => {
     if (active.length === 0) {
@@ -380,6 +479,17 @@ function HomeScreenInner() {
     const dropoff = geoPointToLatLng(first.request.dropoffLocation);
 
     const markers: MarkerData[] = [];
+
+    if (userLocation) {
+          markers.unshift({
+            ...userLocation,
+            title: 'You',
+            color: ACCENT, // blue circle distinguishes you from pickup/dropoff
+            isUserLocation: true,
+            
+          });
+        }
+
     if (pickup) {
       markers.push({ ...pickup, title: 'Pickup', color: GREEN });
     }
@@ -457,6 +567,7 @@ function HomeScreenInner() {
                 style={styles.profileRow}
                 onPress={() => handleViewProfile(ride.otherUser)}
               >
+                <RidePricingInfo request={ride.request} />
                 <View style={styles.avatarSmall}>
                   <Ionicons name="person" size={18} color="#999" />
                 </View>
@@ -533,8 +644,44 @@ function HomeScreenInner() {
       );
     }
 
-    return (
+    interface ViewScheduleButtonProps {
+      onPress: () => void;
+    }
+
+    function ViewScheduleButton({ onPress }: ViewScheduleButtonProps) {
+      return (
+        <TouchableOpacity style={scheduleStyles.button} onPress={onPress}>
+          <Ionicons name="calendar" size={18} color="#007AFF" />
+          <Text style={scheduleStyles.text}>View Schedule</Text>
+          <Ionicons name="chevron-forward" size={16} color="#007AFF" />
+        </TouchableOpacity>
+      );
+    }
+
+    const scheduleStyles = StyleSheet.create({
+      button: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#EFF6FF',
+        marginHorizontal: 16,
+        marginTop: 12,
+        padding: 14,
+        borderRadius: 12,
+        gap: 8,
+      },
+      text: {
+        flex: 1,
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#007AFF',
+      },
+    });
+
+    <ViewScheduleButton onPress={() => router.push('/driver-details')} />
+    return (      
+      
       <ScrollView style={styles.upcomingList} contentContainerStyle={styles.upcomingContent} showsVerticalScrollIndicator={false}>
+        <UpcomingMapSection upcoming={upcoming} userLocation={userLocation} />
         {upcoming.map((ride) => {
           const ready = isUserReady(ride);
           const canConfirm = !ready;
@@ -580,6 +727,7 @@ function HomeScreenInner() {
                 style={styles.profileRow}
                 onPress={() => handleViewProfile(ride.otherUser)}
               >
+                <RidePricingInfo request={ride.request} />
                 <View style={styles.avatarSmall}>
                   <Ionicons name="person" size={18} color="#999" />
                 </View>
@@ -688,6 +836,116 @@ function HomeScreenInner() {
     </View>
   );
 }
+
+/** Call inside HomeScreenInner to get live device location. */
+function useUserLocation() {
+  const [userLocation, setUserLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+ 
+  useEffect(() => {
+    let sub: Location.LocationSubscription | null = null;
+ 
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+ 
+      // Get an immediate fix first…
+      const initial = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      setUserLocation({
+        latitude: initial.coords.latitude,
+        longitude: initial.coords.longitude,
+      });
+ 
+      // …then keep watching for updates.
+      sub = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, distanceInterval: 20 },
+        (loc) =>
+          setUserLocation({
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+          }),
+      );
+    })();
+ 
+    return () => {
+      sub?.remove();
+    };
+  }, []);
+ 
+  return userLocation;
+}
+
+function UpcomingMapSection({ upcoming, userLocation }: UpcomingMapSectionProps) {
+  const upcomingMarkers: MarkerData[] = [];
+
+  if (userLocation) {
+    upcomingMarkers.push({
+      ...userLocation,
+      title: 'You',
+      color: '#007AFF',
+      isUserLocation: true,
+      calloutLines: ['📍 Your location'],
+    });
+  }
+
+  upcoming.forEach((ride) => {
+    const pickup = geoPointToLatLng(ride.request.pickupLocation);
+    const dropoff = geoPointToLatLng(ride.request.dropoffLocation);
+
+    if (pickup) {
+      upcomingMarkers.push({
+        ...pickup,
+        title: `Pickup – ${ride.otherUser.name}`,
+        color: GREEN,
+        calloutLines: [
+          `📍 Pickup with ${ride.otherUser.name}`,
+          ride.pickupAddress,
+          formatDate(ride.confirmation.nextRideDate),
+          formatTime24to12(ride.request.requestedStart),
+        ],
+      });
+    }
+    if (dropoff) {
+      upcomingMarkers.push({
+        ...dropoff,
+        title: `Drop-off – ${ride.otherUser.name}`,
+        color: RED,
+        calloutLines: [
+          `🏁 Drop-off – ${ride.otherUser.name}`,
+          ride.dropoffAddress,
+          formatDate(ride.confirmation.nextRideDate),
+          formatTime24to12(ride.request.requestedEnd),
+        ],
+      });
+    }
+  });
+
+  // Centre map on user, or first marker, or a US default
+  const centre = userLocation ??
+    (upcomingMarkers[0]
+      ? { latitude: upcomingMarkers[0].latitude, longitude: upcomingMarkers[0].longitude }
+      : { latitude: 33.749, longitude: -84.388 });
+
+  if (upcomingMarkers.length === 0) return null;
+
+  return (
+    <View style={{ height: 200 }}>
+      <MapView
+        latitude={centre.latitude}
+        longitude={centre.longitude}
+        markers={upcomingMarkers}
+      />
+    </View>
+  );
+}
+
+
+
+
 
 const styles = StyleSheet.create({
   container: {
