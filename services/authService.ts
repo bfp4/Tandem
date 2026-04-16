@@ -4,6 +4,10 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signOut as firebaseSignOut,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  updateEmail,
+  updatePassword,
 } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '@/config/firebase';
@@ -53,16 +57,66 @@ export function getCurrentUser() {
   return auth.currentUser;
 }
 
+async function requireAuthenticatedUser() {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('No authenticated user.');
+  }
+  return currentUser;
+}
+
+/**
+ * Reauthenticates the current user using email + current password.
+ * Firebase requires "recent login" for sensitive changes like email/password.
+ */
+export async function reauthenticateWithCurrentPassword(
+  currentPassword: string,
+): Promise<void> {
+  const currentUser = await requireAuthenticatedUser();
+
+  const email = currentUser.email;
+  if (!email) {
+    throw new Error('Your account does not have an email address associated with it.');
+  }
+  if (!currentPassword) {
+    throw new Error('Current password is required.');
+  }
+
+  const credential = EmailAuthProvider.credential(email, currentPassword);
+  await reauthenticateWithCredential(currentUser, credential);
+}
+
+export async function changePasswordWithCurrentPassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const currentUser = await requireAuthenticatedUser();
+  if (!newPassword) {
+    throw new Error('New password is required.');
+  }
+  await reauthenticateWithCurrentPassword(currentPassword);
+  await updatePassword(currentUser, newPassword);
+}
+
+export async function changeEmailWithCurrentPassword(
+  currentPassword: string,
+  newEmail: string,
+): Promise<void> {
+  const currentUser = await requireAuthenticatedUser();
+  if (!newEmail) {
+    throw new Error('New email is required.');
+  }
+  await reauthenticateWithCurrentPassword(currentPassword);
+  await updateEmail(currentUser, newEmail);
+}
+
 /**
  * Fetches the signed-in user's Firestore profile from /users/{uid}.
  * This is the standard way to get the logged-in user's data anywhere in the app.
  * Throws if no user is currently signed in or if the document does not exist.
  */
 export async function getCurrentUserProfile(): Promise<User> {
-  const currentUser = auth.currentUser;
-  if (!currentUser) {
-    throw new Error('No authenticated user.');
-  }
+  const currentUser = await requireAuthenticatedUser();
 
   const snap = await getDoc(doc(db, 'users', currentUser.uid));
   if (!snap.exists()) {

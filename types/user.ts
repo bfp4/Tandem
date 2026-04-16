@@ -4,6 +4,17 @@ import { Timestamp } from 'firebase/firestore';
 export type AppearancePreference = 'system' | 'light' | 'dark';
 export type GenderPreference = 'any' | 'female' | 'male' | 'nonbinary';
 
+export type UserBankInfo = {
+  /** e.g. "Chase", "Wells Fargo", etc. */
+  bank?: string;
+  /** e.g. "Visa •••• 1234", "Apple Pay", etc. */
+  paymentMethod?: string;
+  /** Drivers only. e.g. "Direct deposit", "Debit payout", etc. */
+  payoutMethod?: string;
+  /** Allow future fields without widening to `any` everywhere. */
+  [key: string]: unknown;
+};
+
 export interface User {
   username: string;
   name: string;
@@ -25,7 +36,8 @@ export interface User {
    * @readonly - set by Cloud Function only
    */
   rideCount: number;
-  bankInfo: Record<string, any>;
+  /** Payment/financial info; may be null for newly-created accounts */
+  bankInfo: UserBankInfo | null;
   /** Updated on every app launch */
   fcmToken: string;
   /**

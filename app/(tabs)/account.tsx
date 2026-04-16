@@ -1,5 +1,9 @@
 import { useAuth } from '@/context/AuthContext';
-import { updateUserPreferences } from '@/services/userService';
+import {
+  changeEmailWithCurrentPassword,
+  changePasswordWithCurrentPassword,
+} from '@/services/authService';
+import { updateUser, updateUserPreferences } from '@/services/userService';
 import type { AppearancePreference, GenderPreference } from '@/types/user';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -28,6 +32,9 @@ export default function AccountScreen() {
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [bank, setBank] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [payoutMethod, setPayoutMethod] = useState('');
+  const [bankInfoBase, setBankInfoBase] = useState<Record<string, unknown>>({});
   const [activeRole, setActiveRole] = useState('');
   const [createdAtText, setCreatedAtText] = useState('');
   const [starRating, setStarRating] = useState('');
@@ -39,6 +46,10 @@ export default function AccountScreen() {
   const [temporaryMessage, setTemporaryMessage] = useState('');
   const [accountCenterMessage, setAccountCenterMessage] = useState('');
   const [photoMessage, setPhotoMessage] = useState('');
+  const [securityCurrentPassword, setSecurityCurrentPassword] = useState('');
+  const [securityNewPassword, setSecurityNewPassword] = useState('');
+  const [securityNewEmail, setSecurityNewEmail] = useState('');
+  const [securitySaving, setSecuritySaving] = useState(false);
 
   // Preferences (Account Center)
   const [prefNotificationsEnabled, setPrefNotificationsEnabled] = useState(true);
@@ -46,6 +57,7 @@ export default function AccountScreen() {
   const [prefPlaceSettings, setPrefPlaceSettings] = useState('');
   const [prefGenderPreference, setPrefGenderPreference] = useState<GenderPreference>('any');
   const [savingPreferences, setSavingPreferences] = useState(false);
+  const [savingPayment, setSavingPayment] = useState(false);
 
 
 
@@ -64,7 +76,28 @@ export default function AccountScreen() {
         setUsername(data.username || '');
         setPhone(data.phone || '');
         setAddress(data.address || '');
-        setBank(data.bank?.info || '');
+        const bankInfoRaw: unknown = data.bankInfo ?? null;
+        const bankInfo =
+          bankInfoRaw && typeof bankInfoRaw === 'object'
+            ? (bankInfoRaw as Record<string, unknown>)
+            : {};
+        setBankInfoBase(bankInfo);
+
+        // Backwards compatibility: some older docs stored bank under `bank.info`
+        const legacyBank =
+          data.bank && typeof data.bank === 'object'
+            ? (data.bank as any)?.info
+            : undefined;
+
+        setBank(
+          typeof bankInfo.bank === 'string'
+            ? bankInfo.bank
+            : typeof legacyBank === 'string'
+              ? legacyBank
+              : ''
+        );
+        setPaymentMethod(typeof bankInfo.paymentMethod === 'string' ? bankInfo.paymentMethod : '');
+        setPayoutMethod(typeof bankInfo.payoutMethod === 'string' ? bankInfo.payoutMethod : '');
         setActiveRole(data.activeRole || '');
         setStarRating(
           data.starRating !== undefined && data.starRating !== null
@@ -177,13 +210,75 @@ export default function AccountScreen() {
     );
   };
   const handleChangePasswordPress = () => {
-    setTemporaryMessage('Change password is not connected yet.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
+    setAccountCenterMessage('');
+    setSecurityCurrentPassword('');
+    setSecurityNewPassword('');
+    setAccountCenterView('security_change_password');
   };
 
   const handleChangeEmailPress = () => {
-    setTemporaryMessage('Change email is not connected yet.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
+    setAccountCenterMessage('');
+    setSecurityCurrentPassword('');
+    setSecurityNewEmail(user?.email ?? '');
+    setAccountCenterView('security_change_email');
+  };
+
+  const handleSaveNewPassword = async () => {
+    if (!user) return;
+    const currentPassword = securityCurrentPassword;
+    const newPassword = securityNewPassword;
+
+    if (!currentPassword.trim()) {
+      Alert.alert('Current password required', 'Please enter your current password.');
+      return;
+    }
+    if (newPassword.length < 6) {
+      Alert.alert('Password too short', 'New password must be at least 6 characters.');
+      return;
+    }
+
+    setSecuritySaving(true);
+    try {
+      await changePasswordWithCurrentPassword(currentPassword, newPassword);
+      setAccountCenterMessage('Password updated.');
+      setSecurityCurrentPassword('');
+      setSecurityNewPassword('');
+      setAccountCenterView('security');
+    } catch (error: any) {
+      Alert.alert('Error', error?.message ?? 'Failed to change password');
+    } finally {
+      setSecuritySaving(false);
+    }
+  };
+
+  const handleSaveNewEmail = async () => {
+    if (!user) return;
+    const currentPassword = securityCurrentPassword;
+    const newEmail = securityNewEmail.trim();
+
+    if (!currentPassword.trim()) {
+      Alert.alert('Current password required', 'Please enter your current password.');
+      return;
+    }
+    if (!newEmail || !newEmail.includes('@')) {
+      Alert.alert('Invalid email', 'Please enter a valid email address.');
+      return;
+    }
+
+    setSecuritySaving(true);
+    try {
+      await changeEmailWithCurrentPassword(currentPassword, newEmail);
+      // Keep Firestore profile (if present) consistent with Auth email.
+      await updateUser(user.uid, { email: newEmail } as any);
+      setAccountCenterMessage('Email updated.');
+      setSecurityCurrentPassword('');
+      setSecurityNewEmail('');
+      setAccountCenterView('security');
+    } catch (error: any) {
+      Alert.alert('Error', error?.message ?? 'Failed to change email');
+    } finally {
+      setSecuritySaving(false);
+    }
   };
   const handlePaymentMethodsPress = () => {
     setTemporaryMessage('Payment methods are not connected yet.');
@@ -284,6 +379,29 @@ export default function AccountScreen() {
       Alert.alert('Error', error?.message ?? 'Failed to save preferences');
     } finally {
       setSavingPreferences(false);
+    }
+  };
+
+  const handleSavePaymentFinancial = async () => {
+    if (!user) return;
+    setSavingPayment(true);
+    try {
+      const nextBankInfo: Record<string, unknown> = {
+        ...bankInfoBase,
+        bank: bank.trim(),
+        paymentMethod: paymentMethod.trim(),
+      };
+      if (activeRole === 'driver') {
+        nextBankInfo.payoutMethod = payoutMethod.trim();
+      }
+      await updateUser(user.uid, { bankInfo: nextBankInfo as any });
+      setTemporaryMessage('Payment / Financial saved.');
+      setTimeout(() => setTemporaryMessage(''), 2500);
+      await loadProfile();
+    } catch (error: any) {
+      Alert.alert('Error', error?.message ?? 'Failed to save payment / financial');
+    } finally {
+      setSavingPayment(false);
     }
   };
 
@@ -535,6 +653,159 @@ export default function AccountScreen() {
                 <TouchableOpacity style={styles.modalMenuItem} onPress={handleChangeEmailPress}>
                   <Text style={styles.modalMenuText}>Change Email</Text>
                   <Ionicons name="chevron-forward" size={20} color="#999" />
+                </TouchableOpacity>
+              </>
+            )}
+
+            {accountCenterView === 'security_change_password' && (
+              <>
+                <TouchableOpacity style={styles.backRow} onPress={() => setAccountCenterView('security')}>
+                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
+                  <Text style={styles.backRowText}>Back to Security</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.subSectionTitle}>Change Password</Text>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Current password</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter current password"
+                    value={securityCurrentPassword}
+                    onChangeText={setSecurityCurrentPassword}
+                    placeholderTextColor="#999"
+                    secureTextEntry
+                    autoCapitalize="none"
+                  />
+                </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>New password</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter new password"
+                    value={securityNewPassword}
+                    onChangeText={setSecurityNewPassword}
+                    placeholderTextColor="#999"
+                    secureTextEntry
+                    autoCapitalize="none"
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.saveButton, securitySaving ? styles.saveButtonDisabled : null]}
+                  onPress={handleSaveNewPassword}
+                  disabled={securitySaving}
+                >
+                  <Ionicons name="save" size={20} color="#fff" />
+                  <Text style={styles.saveButtonText}>
+                    {securitySaving ? 'Saving...' : 'Save Password'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {accountCenterView === 'security_change_email' && (
+              <>
+                <TouchableOpacity style={styles.backRow} onPress={() => setAccountCenterView('security')}>
+                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
+                  <Text style={styles.backRowText}>Back to Security</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.subSectionTitle}>Change Email</Text>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Current password</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter current password"
+                    value={securityCurrentPassword}
+                    onChangeText={setSecurityCurrentPassword}
+                    placeholderTextColor="#999"
+                    secureTextEntry
+                    autoCapitalize="none"
+                  />
+                </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>New email</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter new email"
+                    value={securityNewEmail}
+                    onChangeText={setSecurityNewEmail}
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.saveButton, securitySaving ? styles.saveButtonDisabled : null]}
+                  onPress={handleSaveNewEmail}
+                  disabled={securitySaving}
+                >
+                  <Ionicons name="save" size={20} color="#fff" />
+                  <Text style={styles.saveButtonText}>
+                    {securitySaving ? 'Saving...' : 'Save Email'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {accountCenterView === 'payment' && (
+              <>
+                <TouchableOpacity style={styles.backRow} onPress={handleBackToAccountCenterMenu}>
+                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
+                  <Text style={styles.backRowText}>Back to Account Center</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.subSectionTitle}>Payment / Financial</Text>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Bank</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your bank"
+                    value={bank}
+                    onChangeText={setBank}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Payment Method</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your payment method"
+                    value={paymentMethod}
+                    onChangeText={setPaymentMethod}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+
+                {activeRole === 'driver' && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionLabel}>Payout Method</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter your payout method"
+                      value={payoutMethod}
+                      onChangeText={setPayoutMethod}
+                      placeholderTextColor="#999"
+                    />
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.saveButton, savingPayment ? styles.saveButtonDisabled : null]}
+                  onPress={handleSavePaymentFinancial}
+                  disabled={savingPayment}
+                >
+                  <Ionicons name="save" size={20} color="#fff" />
+                  <Text style={styles.saveButtonText}>
+                    {savingPayment ? 'Saving...' : 'Save Payment / Financial'}
+                  </Text>
                 </TouchableOpacity>
               </>
             )}
