@@ -1,6 +1,9 @@
 import { Timestamp } from 'firebase/firestore';
 
 // Document ID = Firebase Auth uid — never stored as a field
+export type AppearancePreference = 'system' | 'light' | 'dark';
+export type GenderPreference = 'any' | 'female' | 'male' | 'nonbinary';
+
 export interface User {
   username: string;
   name: string;
@@ -41,6 +44,8 @@ export interface User {
   /** Longitude component of the user's base location */
   lng?: number;
   createdAt: Timestamp;
+  /** ISO string (some screens write this client-side) */
+  updatedAt?: string;
   /** Driver only — null for riders */
   carDetails: {
     licensePlate: string;
@@ -48,6 +53,14 @@ export interface User {
     /** URL to Firebase Storage */
     photo: string;
   } | null;
+
+  /** User-controlled preferences */
+  preferences?: {
+    notificationsEnabled?: boolean;
+    appearance?: AppearancePreference;
+    placeSettings?: string;
+    genderPreference?: GenderPreference;
+  };
 
   uid: string;
 }

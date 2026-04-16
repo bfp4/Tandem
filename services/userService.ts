@@ -51,6 +51,13 @@ export async function updateUser(
   await updateDoc(doc(db, 'users', userId), data as Record<string, unknown>);
 }
 
+export async function updateUserPreferences(
+  userId: string,
+  preferences: NonNullable<User['preferences']>,
+): Promise<void> {
+  await updateUser(userId, { preferences });
+}
+
 export async function updateFcmToken(
   userId: string,
   token: string,

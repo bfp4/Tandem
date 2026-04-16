@@ -1,4 +1,6 @@
 import { useAuth } from '@/context/AuthContext';
+import { updateUserPreferences } from '@/services/userService';
+import type { AppearancePreference, GenderPreference } from '@/types/user';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
@@ -37,6 +39,13 @@ export default function AccountScreen() {
   const [temporaryMessage, setTemporaryMessage] = useState('');
   const [accountCenterMessage, setAccountCenterMessage] = useState('');
   const [photoMessage, setPhotoMessage] = useState('');
+
+  // Preferences (Account Center)
+  const [prefNotificationsEnabled, setPrefNotificationsEnabled] = useState(true);
+  const [prefAppearance, setPrefAppearance] = useState<AppearancePreference>('system');
+  const [prefPlaceSettings, setPrefPlaceSettings] = useState('');
+  const [prefGenderPreference, setPrefGenderPreference] = useState<GenderPreference>('any');
+  const [savingPreferences, setSavingPreferences] = useState(false);
 
 
 
@@ -79,6 +88,27 @@ export default function AccountScreen() {
           setCarPhoto('');
         }
 
+        // Preferences
+        const prefs = data.preferences || {};
+        setPrefNotificationsEnabled(
+          typeof prefs.notificationsEnabled === 'boolean'
+            ? prefs.notificationsEnabled
+            : true
+        );
+        setPrefAppearance(
+          prefs.appearance === 'light' || prefs.appearance === 'dark' || prefs.appearance === 'system'
+            ? prefs.appearance
+            : 'system'
+        );
+        setPrefPlaceSettings(typeof prefs.placeSettings === 'string' ? prefs.placeSettings : '');
+        setPrefGenderPreference(
+          prefs.genderPreference === 'female' ||
+            prefs.genderPreference === 'male' ||
+            prefs.genderPreference === 'nonbinary' ||
+            prefs.genderPreference === 'any'
+            ? prefs.genderPreference
+            : 'any'
+        );
       }
     } catch (error) {
       console.error('Error loading profile:', error);
@@ -184,27 +214,24 @@ export default function AccountScreen() {
   };
 
   const handleNotificationsSettingsPress = () => {
-    setTemporaryMessage('Notification settings are not connected yet.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
+    setAccountCenterView('preferences_notifications');
   };
 
   const handleAppearanceSettingsPress = () => {
-    setTemporaryMessage('Appearance settings are not connected yet.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
+    setAccountCenterView('preferences_appearance');
   };
 
   const handlePlaceSettingsMenuPress = () => {
-    setTemporaryMessage('Place settings are not connected yet.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
+    setAccountCenterView('preferences_place');
   };
 
   const handleGenderPreferencePress = () => {
-    setTemporaryMessage('Gender preference is not connected yet.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
+    setAccountCenterView('preferences_gender');
   };
   const handleOpenAccountCenter = () => {
     setAccountCenterView('menu');
     setAccountCenterVisible(true);
+    loadProfile();
   };
 
   const handleCloseAccountCenter = () => {
@@ -234,6 +261,30 @@ export default function AccountScreen() {
 
   const handleBackToAccountCenterMenu = () => {
     setAccountCenterView('menu');
+  };
+
+  const handleBackToPreferencesMenu = () => {
+    setAccountCenterView('preferences');
+  };
+
+  const handleSavePreferences = async () => {
+    if (!user) return;
+    setSavingPreferences(true);
+    try {
+      await updateUserPreferences(user.uid, {
+        notificationsEnabled: prefNotificationsEnabled,
+        appearance: prefAppearance,
+        placeSettings: prefPlaceSettings.trim(),
+        genderPreference: prefGenderPreference,
+      });
+      setTemporaryMessage('Preferences saved.');
+      setTimeout(() => setTemporaryMessage(''), 2500);
+      await loadProfile();
+    } catch (error: any) {
+      Alert.alert('Error', error?.message ?? 'Failed to save preferences');
+    } finally {
+      setSavingPreferences(false);
+    }
   };
 
   return (
@@ -544,6 +595,165 @@ export default function AccountScreen() {
 
               </>
             )}
+
+            {accountCenterView === 'preferences_notifications' && (
+              <>
+                <TouchableOpacity style={styles.backRow} onPress={handleBackToPreferencesMenu}>
+                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
+                  <Text style={styles.backRowText}>Back to Preferences</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.subSectionTitle}>Notifications</Text>
+
+                <TouchableOpacity
+                  style={styles.choiceRow}
+                  onPress={() => setPrefNotificationsEnabled((v) => !v)}
+                >
+                  <Text style={styles.choiceRowText}>Push notifications</Text>
+                  <Text style={styles.choiceRowValue}>
+                    {prefNotificationsEnabled ? 'On' : 'Off'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.saveButton, savingPreferences ? styles.saveButtonDisabled : null]}
+                  onPress={handleSavePreferences}
+                  disabled={savingPreferences}
+                >
+                  <Ionicons name="save" size={20} color="#fff" />
+                  <Text style={styles.saveButtonText}>
+                    {savingPreferences ? 'Saving...' : 'Save Notifications'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {accountCenterView === 'preferences_appearance' && (
+              <>
+                <TouchableOpacity style={styles.backRow} onPress={handleBackToPreferencesMenu}>
+                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
+                  <Text style={styles.backRowText}>Back to Preferences</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.subSectionTitle}>Appearance</Text>
+
+                <View style={styles.choiceGroup}>
+                  {(['system', 'light', 'dark'] as AppearancePreference[]).map((opt) => (
+                    <TouchableOpacity
+                      key={opt}
+                      style={[
+                        styles.choicePill,
+                        prefAppearance === opt ? styles.choicePillActive : null,
+                      ]}
+                      onPress={() => setPrefAppearance(opt)}
+                    >
+                      <Text
+                        style={[
+                          styles.choicePillText,
+                          prefAppearance === opt ? styles.choicePillTextActive : null,
+                        ]}
+                      >
+                        {opt === 'system' ? 'System' : opt === 'light' ? 'Light' : 'Dark'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.saveButton, savingPreferences ? styles.saveButtonDisabled : null]}
+                  onPress={handleSavePreferences}
+                  disabled={savingPreferences}
+                >
+                  <Ionicons name="save" size={20} color="#fff" />
+                  <Text style={styles.saveButtonText}>
+                    {savingPreferences ? 'Saving...' : 'Save Appearance'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {accountCenterView === 'preferences_place' && (
+              <>
+                <TouchableOpacity style={styles.backRow} onPress={handleBackToPreferencesMenu}>
+                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
+                  <Text style={styles.backRowText}>Back to Preferences</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.subSectionTitle}>Place Settings</Text>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Default place</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Home city, neighborhood, campus"
+                    value={prefPlaceSettings}
+                    onChangeText={setPrefPlaceSettings}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.saveButton, savingPreferences ? styles.saveButtonDisabled : null]}
+                  onPress={handleSavePreferences}
+                  disabled={savingPreferences}
+                >
+                  <Ionicons name="save" size={20} color="#fff" />
+                  <Text style={styles.saveButtonText}>
+                    {savingPreferences ? 'Saving...' : 'Save Place Settings'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {accountCenterView === 'preferences_gender' && (
+              <>
+                <TouchableOpacity style={styles.backRow} onPress={handleBackToPreferencesMenu}>
+                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
+                  <Text style={styles.backRowText}>Back to Preferences</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.subSectionTitle}>Gender Preference</Text>
+
+                <View style={styles.choiceGroup}>
+                  {(['any', 'female', 'male', 'nonbinary'] as GenderPreference[]).map((opt) => (
+                    <TouchableOpacity
+                      key={opt}
+                      style={[
+                        styles.choicePill,
+                        prefGenderPreference === opt ? styles.choicePillActive : null,
+                      ]}
+                      onPress={() => setPrefGenderPreference(opt)}
+                    >
+                      <Text
+                        style={[
+                          styles.choicePillText,
+                          prefGenderPreference === opt ? styles.choicePillTextActive : null,
+                        ]}
+                      >
+                        {opt === 'any'
+                          ? 'Any'
+                          : opt === 'female'
+                            ? 'Female'
+                            : opt === 'male'
+                              ? 'Male'
+                              : 'Non-binary'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.saveButton, savingPreferences ? styles.saveButtonDisabled : null]}
+                  onPress={handleSavePreferences}
+                  disabled={savingPreferences}
+                >
+                  <Ionicons name="save" size={20} color="#fff" />
+                  <Text style={styles.saveButtonText}>
+                    {savingPreferences ? 'Saving...' : 'Save Gender Preference'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
           </ScrollView>
         </View>
       </Modal>
@@ -796,5 +1006,53 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6366F1',
     marginBottom: 16,
+  },
+
+  choiceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 18,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  choiceRowText: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  choiceRowValue: {
+    fontSize: 16,
+    color: '#6366F1',
+    fontWeight: '700',
+  },
+  choiceGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 16,
+  },
+  choicePill: {
+    backgroundColor: '#fff',
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  choicePillActive: {
+    borderColor: '#6366F1',
+    backgroundColor: '#EEF2FF',
+  },
+  choicePillText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+  },
+  choicePillTextActive: {
+    color: '#4338CA',
   },
 });
