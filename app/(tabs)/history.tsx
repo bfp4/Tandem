@@ -5,7 +5,7 @@ import { getUser } from '@/services/userService';
 import type { RideRequest } from '@/types/rideRequest';
 import type { User } from '@/types/user';
 import { Ionicons } from '@expo/vector-icons';
-import { doc, getDoc, getDocs, query, collection, setDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -545,7 +545,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   timeCell: {
-    height: 26,
+    height: 16,
     width: 88,
     justifyContent: 'center',
     paddingRight: 8,
@@ -558,8 +558,8 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   slotCell: {
-    height: 26,
-    width: 66,
+    height: 16,
+    width: 156,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 5,

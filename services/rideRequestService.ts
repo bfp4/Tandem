@@ -14,6 +14,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
+import { calculateDriveTime } from '@/utils/driveTime';
 import { createNotification } from './notificationService';
 import { splitBlock } from './scheduleBlockService';
 
@@ -23,7 +24,7 @@ export interface RideRequestWithId extends RideRequest {
 
 type CreateRideRequestData = Omit<
   RideRequest,
-  'requestedAt' | 'respondedAt' | 'pricingSnapshot' | 'status'
+  'requestedAt' | 'respondedAt' | 'pricingSnapshot' | 'status' | 'estimatedDriveTimeMinutes'
 >;
 
 /** Returns "YYYY-MM-DD" of the first repeatDay on or after the given date. */
@@ -74,10 +75,27 @@ export async function createRideRequest(
     }
   }
 
+  // Calculate estimated drive time from pickup to dropoff
+  let estimatedDriveTimeMinutes: number | null = null;
+  try {
+    const pickup = {
+      latitude: data.pickupLocation.latitude,
+      longitude: data.pickupLocation.longitude,
+    };
+    const dropoff = {
+      latitude: data.dropoffLocation.latitude,
+      longitude: data.dropoffLocation.longitude,
+    };
+    estimatedDriveTimeMinutes = await calculateDriveTime(pickup, dropoff);
+  } catch (error) {
+    console.warn('Failed to calculate drive time during ride request creation:', error);
+  }
+
   const ref = await addDoc(collection(db, 'rideRequests'), {
     ...data,
     status: 'pending',
     pricingSnapshot: null,
+    estimatedDriveTimeMinutes,
     requestedAt: serverTimestamp(),
     respondedAt: null,
   });

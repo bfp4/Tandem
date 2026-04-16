@@ -2,8 +2,7 @@ import { useAuth } from '@/context/AuthContext';
 import { getOrCreateConversation } from '@/services/messagingService';
 import { createNotification } from '@/services/notificationService';
 import { createRideRequest } from '@/services/rideRequestService';
-import { getUser } from '@/services/userService';
-import type { User } from '@/types/user';
+import { calculateDriveTime, formatDriveTime } from '@/utils/driveTime';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { GeoPoint, doc, getDoc } from 'firebase/firestore';
@@ -104,6 +103,8 @@ export default function DriverDetailsScreen() {
   const [pickup, setPickup] = useState<ResolvedLocation | null>(null);
   const [dropoff, setDropoff] = useState<ResolvedLocation | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [estimatedDriveTime, setEstimatedDriveTime] = useState<number | null>(null);
+  const [calculatingDriveTime, setCalculatingDriveTime] = useState(false);
 
   // Address lookup modal state
   const [addressModalVisible, setAddressModalVisible] = useState(false);
@@ -158,6 +159,31 @@ export default function DriverDetailsScreen() {
   useEffect(() => {
     loadSchedules();
   }, [driverId, user]);
+
+  useEffect(() => {
+    const calculateEstimate = async () => {
+      if (!pickup || !dropoff) {
+        setEstimatedDriveTime(null);
+        return;
+      }
+
+      setCalculatingDriveTime(true);
+      try {
+        const driveTime = await calculateDriveTime(
+          { latitude: pickup.lat, longitude: pickup.lng },
+          { latitude: dropoff.lat, longitude: dropoff.lng }
+        );
+        setEstimatedDriveTime(driveTime);
+      } catch (error) {
+        console.warn('Failed to calculate drive time:', error);
+        setEstimatedDriveTime(null);
+      } finally {
+        setCalculatingDriveTime(false);
+      }
+    };
+
+    calculateEstimate();
+  }, [pickup, dropoff]);
 
   const loadSchedules = async () => {
     if (!driverId || !user) return;
@@ -418,6 +444,20 @@ export default function DriverDetailsScreen() {
                       {dropoff ? dropoff.text : 'Tap to search address'}
                     </Text>
                   </TouchableOpacity>
+
+                  {pickup && dropoff && (
+                    <View style={styles.driveTimeContainer}>
+                      <Ionicons name="car-outline" size={14} color="#007AFF" />
+                      <Text style={styles.driveTimeLabel}>Est. drive time:</Text>
+                      {calculatingDriveTime ? (
+                        <ActivityIndicator size="small" color="#007AFF" />
+                      ) : (
+                        <Text style={styles.driveTimeValue}>
+                          {formatDriveTime(estimatedDriveTime)}
+                        </Text>
+                      )}
+                    </View>
+                  )}
 
                   <TouchableOpacity
                     style={[styles.requestButton, submitting && styles.requestButtonDisabled]}
@@ -803,6 +843,27 @@ const styles = StyleSheet.create({
   },
   locationPickerTextSet: {
     color: '#333',
+  },
+  driveTimeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    marginTop: 8,
+    gap: 6,
+  },
+  driveTimeLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#007AFF',
+  },
+  driveTimeValue: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#007AFF',
+    marginLeft: 'auto',
   },
   requestButton: {
     marginTop: 10,

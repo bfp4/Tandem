@@ -11,7 +11,7 @@ import { getRideRequestById, type RideRequestWithId } from '@/services/rideReque
 import { getUser } from '@/services/userService';
 import type { User as AppUser } from '@/types/user';
 import { reverseGeocode } from '@/utils/geocoding';
-import { fetchRoute } from '@/utils/routing';
+import { fetchRouteWithSteps } from '@/utils/routing';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
@@ -161,6 +161,7 @@ function RidePricingInfo({ request }: RidePricingInfoProps) {
     request.requestedEnd,
   );
   const price = request.pricingSnapshot?.totalPrice;
+  //const driveTime = request.estimatedDriveTimeMinutes;
 
   return (
     <View style={pricingStyles.row}>
@@ -171,6 +172,14 @@ function RidePricingInfo({ request }: RidePricingInfoProps) {
       </View>
       <View style={pricingStyles.divider} />
       <View style={pricingStyles.item}>
+        {/* <Ionicons name="car-outline" size={14} color="#6B7280" />
+        <Text style={pricingStyles.label}>Drive Time</Text>
+        <Text style={pricingStyles.value}>
+          {driveTime != null ? formatDuration(driveTime) : '—'}
+        </Text>
+      </View>
+      <View style={pricingStyles.divider} />
+      <View style={pricingStyles.item}> */}
         <Ionicons name="cash-outline" size={14} color="#6B7280" />
         <Text style={pricingStyles.label}>Fare</Text>
         <Text style={pricingStyles.value}>
@@ -396,20 +405,28 @@ useEffect(() => {
     return;
   }
 
-  // ✅ 1. Update route
-  fetchRoute(userLocation, dropoff).then((coords) =>
-    setActiveRoute({ coordinates: coords })
-  );
-
-  // ✅ 2. Calculate straight-line distance
-  const distance = getDistanceMeters(userLocation, dropoff);
-  setDistanceToDropoff(distance);
-
-  // ✅ 3. Estimate ETA (assume ~35 mph average)
-  const speedMetersPerMin = 35 * 1609 / 60;
-  const eta = distance / speedMetersPerMin;
-
-  setEtaMinutes(eta);
+  // Fetch route with actual drive time calculation (like Uber)
+  fetchRouteWithSteps(userLocation, dropoff).then((result) => {
+    // Set the route coordinates for map display
+    setActiveRoute({ coordinates: result.coordinates });
+    
+    // Use the actual route distance (not straight-line)
+    setDistanceToDropoff(result.totalDistance);
+    
+    // Use OSRM's calculated drive time (accounts for roads, speed limits, turns, etc.)
+    if (result.totalDuration && result.totalDuration > 0) {
+      setEtaMinutes(result.totalDuration / 60); // Convert seconds to minutes
+    } else {
+      setEtaMinutes(null);
+    }
+  }).catch((error) => {
+    console.warn('Failed to fetch route for ETA:', error);
+    // Fallback: use straight-line distance and estimate
+    const distance = getDistanceMeters(userLocation, dropoff);
+    setDistanceToDropoff(distance);
+    const speedMetersPerMin = 35 * 1609 / 60;
+    setEtaMinutes(distance / speedMetersPerMin);
+  });
 }, [userLocation, active]);
 
 

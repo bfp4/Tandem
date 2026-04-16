@@ -29,6 +29,8 @@ export interface RideRequest {
   seriesId: string | null;
   /** null until confirmed */
   pricingSnapshot: PricingSnapshot | null;
+  /** Estimated drive time from pickup to dropoff in minutes */
+  //estimatedDriveTimeMinutes: number | null;
   requestedAt: Timestamp;
   respondedAt: Timestamp | null;
 }
