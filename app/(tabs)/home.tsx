@@ -106,10 +106,16 @@ function formatDate(dateStr: string): string {
 
 /** Returns the duration in minutes between two "HH:MM" strings. */
 function getRideDurationMinutes(start: string, end: string): number {
-  if (!start || !end) return 0;
+  if (!start || !end || !start.includes(':') || !end.includes(':')) return 0;
+
   const [sh, sm] = start.split(':').map(Number);
   const [eh, em] = end.split(':').map(Number);
-  return (eh * 60 + em) - (sh * 60 + sm);
+
+  let minutes = (eh * 60 + em) - (sh * 60 + sm);
+
+  if (minutes < 0) minutes += 24 * 60;
+
+  return minutes;
 }
 
 /** Formats a minute count as "X hr Y min" or just "Y min". */
@@ -155,13 +161,27 @@ interface RidePricingInfoProps {
   request: RideRequestWithId;
 }
 
-function RidePricingInfo({ request }: RidePricingInfoProps) {
+interface RidePricingInfoProps {
+  request: RideRequestWithId;
+  rideDistanceMeters?: number | null;
+}
+
+function RidePricingInfo({ request, rideDistanceMeters }: RidePricingInfoProps) {
   const duration = getRideDurationMinutes(
     request.requestedStart,
     request.requestedEnd,
   );
-  const price = request.pricingSnapshot?.totalPrice;
-  //const driveTime = request.estimatedDriveTimeMinutes;
+
+  const fare =
+    request.pricingSnapshot?.totalPrice ??
+    request.pricingSnapshot?.baseFare ??
+    (duration > 0
+      ? Math.round((2.5 + duration * 0.4 + (rideDistanceMeters ?? 0) / 1609.34 * 1.2) * 2) / 2
+      : null);
+
+  const isEstimate =
+    request.pricingSnapshot?.totalPrice == null &&
+    request.pricingSnapshot?.baseFare == null;
 
   return (
     <View style={pricingStyles.row}>
@@ -170,20 +190,16 @@ function RidePricingInfo({ request }: RidePricingInfoProps) {
         <Text style={pricingStyles.label}>Duration</Text>
         <Text style={pricingStyles.value}>{formatDuration(duration)}</Text>
       </View>
+
       <View style={pricingStyles.divider} />
+
       <View style={pricingStyles.item}>
-        {/* <Ionicons name="car-outline" size={14} color="#6B7280" />
-        <Text style={pricingStyles.label}>Drive Time</Text>
-        <Text style={pricingStyles.value}>
-          {driveTime != null ? formatDuration(driveTime) : '—'}
-        </Text>
-      </View>
-      <View style={pricingStyles.divider} />
-      <View style={pricingStyles.item}> */}
         <Ionicons name="cash-outline" size={14} color="#6B7280" />
-        <Text style={pricingStyles.label}>Fare</Text>
+        <Text style={pricingStyles.label}>
+          {isEstimate ? 'Est. Fare' : 'Fare'}
+        </Text>
         <Text style={pricingStyles.value}>
-          {price != null ? `$${price.toFixed(2)}` : '—'}
+          {fare != null ? `$${fare.toFixed(2)}` : '—'}
         </Text>
       </View>
     </View>
@@ -233,7 +249,6 @@ function formatTime24to12(hhmm: string): string {
   const hours = h % 12 === 0 ? 12 : h % 12;
   return `${hours}:${String(m).padStart(2, '0')} ${period}`;
 }
-
 export default function HomeScreenWrapper() {
   return (
     <HomeErrorBoundary>
@@ -642,7 +657,6 @@ useEffect(() => {
                 style={styles.profileRow}
                 onPress={() => handleViewProfile(ride.otherUser)}
               >
-                <RidePricingInfo request={ride.request} />
                 <View style={styles.avatarSmall}>
                   <Ionicons name="person" size={18} color="#999" />
                 </View>
@@ -753,106 +767,117 @@ useEffect(() => {
     });
 
     
-    return (      
-      <><ViewScheduleButton onPress={() => router.push('/driver-details')} />
-      <ScrollView style={styles.upcomingList} contentContainerStyle={styles.upcomingContent} showsVerticalScrollIndicator={false}>
-        <UpcomingMapSection upcoming={upcoming} userLocation={userLocation} />
-        {upcoming.map((ride) => {
-          const ready = isUserReady(ride);
-          const canConfirm = !ready;
-          const waitingOther = ready;
+    return (
+      <><ViewScheduleButton
+        onPress={() => router.push({
+          pathname: '/(tabs)/history',
+        })} />
+        <ScrollView style={styles.upcomingList} contentContainerStyle={styles.upcomingContent} showsVerticalScrollIndicator={false}>
+          <UpcomingMapSection upcoming={upcoming} userLocation={userLocation} />
+          {upcoming.map((ride) => {
+            const ready = isUserReady(ride);
+            const canConfirm = !ready;
+            const waitingOther = ready;
 
-          return (
-            <View key={ride.confirmation.id} style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardDateLarge}>
-                  {formatDate(ride.confirmation.nextRideDate)}
-                </Text>
-                <View style={styles.statusBadge}>
-                  <Ionicons name="time-outline" size={14} color={TEXT_MUTED} />
-                  <Text style={styles.statusText}>Scheduled</Text>
+            return (
+              <View key={ride.confirmation.id} style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardDateLarge}>
+                    {formatDate(ride.confirmation.nextRideDate)}
+                  </Text>
+                  <View style={styles.statusBadge}>
+                    <Ionicons name="time-outline" size={14} color={TEXT_MUTED} />
+                    <Text style={styles.statusText}>Scheduled</Text>
+                  </View>
                 </View>
-              </View>
 
-              <View style={styles.cardTime}>
-                <Ionicons name="time-outline" size={16} color={TEXT_SECONDARY} />
-                <Text style={styles.cardTimeText}>
-                  {formatTime24to12(ride.request.requestedStart)} –{' '}
-                  {formatTime24to12(ride.request.requestedEnd)}
-                </Text>
-              </View>
-
-              <View style={styles.locationBlock}>
-                <View style={styles.locationRow}>
-                  <View style={[styles.locationDot, { backgroundColor: GREEN }]} />
-                  <Text style={styles.locationText} numberOfLines={1}>
-                    {ride.pickupAddress}
+                <View style={styles.cardTime}>
+                  <Ionicons name="time-outline" size={16} color={TEXT_SECONDARY} />
+                  <Text style={styles.cardTimeText}>
+                    {formatTime24to12(ride.request.requestedStart)} –{' '}
+                    {formatTime24to12(ride.request.requestedEnd)}
                   </Text>
                 </View>
-                <View style={styles.locationConnector} />
-                <View style={styles.locationRow}>
-                  <View style={[styles.locationDot, { backgroundColor: RED }]} />
-                  <Text style={styles.locationText} numberOfLines={1}>
-                    {ride.dropoffAddress}
-                  </Text>
-                </View>
-              </View>
 
-              <TouchableOpacity
-                style={styles.profileRow}
-                onPress={() => handleViewProfile(ride.otherUser)}
-              >
-                <RidePricingInfo request={ride.request} />
-                <View style={styles.avatarSmall}>
-                  <Ionicons name="person" size={18} color="#999" />
-                </View>
-                <View style={styles.profileInfo}>
-                  <Text style={styles.profileName}>{ride.otherUser.name}</Text>
-                  <View style={styles.ratingRow}>
-                    <Ionicons name="star" size={12} color="#FFB800" />
-                    <Text style={styles.ratingText}>
-                      {(ride.otherUser.starRating ?? 0).toFixed(1)}
+                <View style={styles.locationBlock}>
+                  <View style={styles.locationRow}>
+                    <View style={[styles.locationDot, { backgroundColor: GREEN }]} />
+                    <Text style={styles.locationText} numberOfLines={1}>
+                      {ride.pickupAddress}
+                    </Text>
+                  </View>
+                  <View style={styles.locationConnector} />
+                  <View style={styles.locationRow}>
+                    <View style={[styles.locationDot, { backgroundColor: RED }]} />
+                    <Text style={styles.locationText} numberOfLines={1}>
+                      {ride.dropoffAddress}
                     </Text>
                   </View>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color={TEXT_MUTED} />
-              </TouchableOpacity>
 
-              <View style={styles.cardActions}>
-                {canConfirm && (
-                  <TouchableOpacity
-                    style={[styles.primaryButton, styles.readyButton, actingOn === ride.confirmation.id && styles.buttonDisabled]}
-                    onPress={() => handleMarkReady(ride)}
-                    disabled={actingOn === ride.confirmation.id}
-                  >
-                    {actingOn === ride.confirmation.id ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <>
-                        <Ionicons name="hand-left" size={18} color="#fff" />
-                        <Text style={styles.primaryButtonText}>I'm Ready</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                )}
-                {waitingOther && (
-                  <View style={styles.waitingBadge}>
-                    <ActivityIndicator size="small" color={ORANGE} />
-                    <Text style={styles.waitingText}>Waiting for other party...</Text>
-                  </View>
-                )}
                 <TouchableOpacity
-                  style={styles.messageChip}
-                  onPress={() => handleMessage(ride.otherUser.uid)}
+                  style={styles.profileRow}
+                  onPress={() => handleViewProfile(ride.otherUser)}
                 >
-                  <Ionicons name="chatbubble-ellipses" size={16} color={ACCENT} />
-                  <Text style={styles.messageChipText}>Message</Text>
+                  <RidePricingInfo
+                    request={ride.request}
+                    rideDistanceMeters={geoPointToLatLng(ride.request.pickupLocation) &&
+                      geoPointToLatLng(ride.request.dropoffLocation)
+                      ? getDistanceMeters(
+                        geoPointToLatLng(ride.request.pickupLocation)!,
+                        geoPointToLatLng(ride.request.dropoffLocation)!
+                      )
+                      : null} />
+                  <View style={styles.avatarSmall}>
+                    <Ionicons name="person" size={18} color="#999" />
+                  </View>
+                  <View style={styles.profileInfo}>
+                    <Text style={styles.profileName}>{ride.otherUser.name}</Text>
+                    <View style={styles.ratingRow}>
+                      <Ionicons name="star" size={12} color="#FFB800" />
+                      <Text style={styles.ratingText}>
+                        {(ride.otherUser.starRating ?? 0).toFixed(1)}
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={TEXT_MUTED} />
                 </TouchableOpacity>
+
+                <View style={styles.cardActions}>
+                  {canConfirm && (
+                    <TouchableOpacity
+                      style={[styles.primaryButton, styles.readyButton, actingOn === ride.confirmation.id && styles.buttonDisabled]}
+                      onPress={() => handleMarkReady(ride)}
+                      disabled={actingOn === ride.confirmation.id}
+                    >
+                      {actingOn === ride.confirmation.id ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <>
+                          <Ionicons name="hand-left" size={18} color="#fff" />
+                          <Text style={styles.primaryButtonText}>I'm Ready</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                  {waitingOther && (
+                    <View style={styles.waitingBadge}>
+                      <ActivityIndicator size="small" color={ORANGE} />
+                      <Text style={styles.waitingText}>Waiting for other party...</Text>
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.messageChip}
+                    onPress={() => handleMessage(ride.otherUser.uid)}
+                  >
+                    <Ionicons name="chatbubble-ellipses" size={16} color={ACCENT} />
+                    <Text style={styles.messageChipText}>Message</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
-          );
-        })}
-      </ScrollView></>
+            );
+          })}
+        </ScrollView></>
     );
   };
 
