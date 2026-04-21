@@ -328,13 +328,15 @@ export default function UserDetailsScreen() {
             </Text>
             <TextInput
               style={[styles.input, errors.phone ? styles.inputError : null]}
-              placeholder="e.g. (555) 000-0000"
+              placeholder="e.g. 5550000000"
               value={phone}
               onChangeText={t => {
-                setPhone(t);
+                const digitsOnly = t.replace(/\D/g, '').slice(0, 15);
+                setPhone(digitsOnly);
                 if (errors.phone) setErrors(prev => ({ ...prev, phone: undefined }));
               }}
               keyboardType="phone-pad"
+              inputMode="numeric"
               placeholderTextColor="#bbb"
             />
             {errors.phone ? <Text style={styles.errorText}>{errors.phone}</Text> : null}

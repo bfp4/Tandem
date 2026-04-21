@@ -5,7 +5,6 @@ import {
   View,
   TextInput,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -17,25 +16,97 @@ import { useRouter } from 'expo-router';
 
 type Mode = 'landing' | 'login' | 'signup';
 
+function getSignUpPasswordError(password: string): string | null {
+  if (password.length < 8) {
+    return 'Password must be at least 8 characters long';
+  }
+  if (!/[A-Z]/.test(password)) {
+    return 'Password must include an uppercase letter';
+  }
+  if (!/[^A-Za-z]/.test(password)) {
+    return 'Password must include a number or symbol (non-letter)';
+  }
+  return null;
+}
+
+function getAuthErrorMessage(error: unknown, mode: 'login' | 'signup'): string {
+  const code: string | undefined =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : undefined;
+
+  switch (code) {
+    case 'auth/invalid-email':
+      return 'That email address is not valid.';
+    case 'auth/email-already-in-use':
+      return 'An account with this email already exists. Try signing in instead.';
+    case 'auth/weak-password':
+      return 'That password is too weak. Please choose a stronger one.';
+    case 'auth/missing-password':
+      return 'Please enter your password.';
+    case 'auth/missing-email':
+      return 'Please enter your email address.';
+    case 'auth/user-disabled':
+      return 'This account has been disabled. Please contact support.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+    case 'auth/invalid-login-credentials':
+      return 'The email or password you entered is incorrect.';
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Please wait a moment and try again.';
+    case 'auth/network-request-failed':
+      return 'Network error. Check your connection and try again.';
+    case 'auth/operation-not-allowed':
+      return 'Email sign-in is currently disabled. Please try another method.';
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return 'Sign-in was cancelled. Please try again.';
+  }
+
+  const message =
+    typeof error === 'object' && error !== null && 'message' in error
+      ? String((error as { message?: unknown }).message ?? '')
+      : '';
+  if (message) return message;
+
+  return mode === 'login'
+    ? 'Could not sign in. Please try again.'
+    : 'Could not create your account. Please try again.';
+}
+
 export default function LoginScreen() {
   const [mode, setMode] = useState<Mode>('landing');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const router = useRouter();
+
+  const clearError = () => {
+    if (errorMessage) setErrorMessage(null);
+  };
+
+  const switchMode = (next: Mode) => {
+    setErrorMessage(null);
+    setMode(next);
+  };
 
   const handleEmailLogin = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      setErrorMessage('Please fill in all fields.');
       return;
     }
+    setErrorMessage(null);
     setLoading(true);
     try {
       await signInWithEmail(email, password);
       router.replace('/(tabs)/home' as any);
-    } catch (error: any) {
-      Alert.alert('Sign In Failed', error.message);
+    } catch (error) {
+      setErrorMessage(getAuthErrorMessage(error, 'login'));
     } finally {
       setLoading(false);
     }
@@ -43,23 +114,25 @@ export default function LoginScreen() {
 
   const handleEmailSignUp = async () => {
     if (!email || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
+      setErrorMessage('Please fill in all fields.');
       return;
     }
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      setErrorMessage('Passwords do not match.');
       return;
     }
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+    const passwordError = getSignUpPasswordError(password);
+    if (passwordError) {
+      setErrorMessage(passwordError);
       return;
     }
+    setErrorMessage(null);
     setLoading(true);
     try {
       await signUpWithEmail(email, password);
       router.replace('/signup/details' as any);
-    } catch (error: any) {
-      Alert.alert('Sign Up Failed', error.message);
+    } catch (error) {
+      setErrorMessage(getAuthErrorMessage(error, 'signup'));
     } finally {
       setLoading(false);
     }
@@ -79,14 +152,14 @@ export default function LoginScreen() {
         <View style={styles.authSection}>
           <TouchableOpacity
             style={styles.primaryButton}
-            onPress={() => setMode('signup')}
+            onPress={() => switchMode('signup')}
           >
             <Text style={styles.primaryButtonText}>Sign Up with Email</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.secondaryButton}
-            onPress={() => setMode('login')}
+            onPress={() => switchMode('login')}
           >
             <Text style={styles.secondaryButtonText}>Sign In</Text>
           </TouchableOpacity>
@@ -104,7 +177,7 @@ export default function LoginScreen() {
         contentContainerStyle={styles.scrollContainer}
         keyboardShouldPersistTaps="handled"
       >
-        <TouchableOpacity style={styles.backButton} onPress={() => setMode('landing')}>
+        <TouchableOpacity style={styles.backButton} onPress={() => switchMode('landing')}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
 
@@ -120,28 +193,75 @@ export default function LoginScreen() {
             style={styles.input}
             placeholder="Email address"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(text) => {
+              setEmail(text);
+              clearError();
+            }}
             autoCapitalize="none"
             keyboardType="email-address"
             placeholderTextColor="#999"
           />
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            placeholderTextColor="#999"
-          />
-          {mode === 'signup' && (
+          <View style={styles.passwordContainer}>
             <TextInput
-              style={styles.input}
-              placeholder="Confirm Password"
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              secureTextEntry
+              style={styles.passwordInput}
+              placeholder="Password"
+              value={password}
+              onChangeText={(text) => {
+                setPassword(text);
+                clearError();
+              }}
+              secureTextEntry={!showPassword}
               placeholderTextColor="#999"
             />
+            <TouchableOpacity
+              style={styles.eyeButton}
+              onPress={() => setShowPassword((v) => !v)}
+              accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+            >
+              <Ionicons
+                name={showPassword ? 'eye-off' : 'eye'}
+                size={20}
+                color="#888"
+              />
+            </TouchableOpacity>
+          </View>
+          {mode === 'signup' && (
+            <View style={styles.passwordContainer}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Confirm Password"
+                value={confirmPassword}
+                onChangeText={(text) => {
+                  setConfirmPassword(text);
+                  clearError();
+                }}
+                secureTextEntry={!showConfirmPassword}
+                placeholderTextColor="#999"
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowConfirmPassword((v) => !v)}
+                accessibilityLabel={showConfirmPassword ? 'Hide password' : 'Show password'}
+              >
+                <Ionicons
+                  name={showConfirmPassword ? 'eye-off' : 'eye'}
+                  size={20}
+                  color="#888"
+                />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {errorMessage && (
+            <View style={styles.errorBanner} accessibilityLiveRegion="polite">
+              <Ionicons
+                name="alert-circle"
+                size={18}
+                color="#B00020"
+                style={styles.errorIcon}
+              />
+              <Text style={styles.errorText}>{errorMessage}</Text>
+            </View>
           )}
 
           <TouchableOpacity
@@ -160,7 +280,7 @@ export default function LoginScreen() {
 
           <TouchableOpacity
             style={styles.switchLink}
-            onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}
+            onPress={() => switchMode(mode === 'login' ? 'signup' : 'login')}
           >
             <Text style={styles.switchLinkText}>
               {mode === 'login'
@@ -246,6 +366,25 @@ const styles = StyleSheet.create({
     borderColor: '#ebebeb',
     color: '#111',
   },
+  passwordContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f7f7f7',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ebebeb',
+    marginBottom: 12,
+  },
+  passwordInput: {
+    flex: 1,
+    padding: 16,
+    fontSize: 16,
+    color: '#111',
+  },
+  eyeButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+  },
   primaryButton: {
     backgroundColor: '#007AFF',
     borderRadius: 12,
@@ -273,6 +412,26 @@ const styles = StyleSheet.create({
   switchLink: {
     alignItems: 'center',
     padding: 8,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#FDECEE',
+    borderWidth: 1,
+    borderColor: '#F5B5BB',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  errorIcon: {
+    marginRight: 8,
+    marginTop: 1,
+  },
+  errorText: {
+    flex: 1,
+    color: '#B00020',
+    fontSize: 14,
+    lineHeight: 20,
   },
   switchLinkText: {
     color: '#007AFF',
