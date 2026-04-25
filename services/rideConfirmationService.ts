@@ -1,20 +1,20 @@
-import {
-  doc,
-  getDoc,
-  updateDoc,
-  collection,
-  addDoc,
-  runTransaction,
-  serverTimestamp,
-  query,
-  where,
-  onSnapshot,
-  type Unsubscribe,
-} from 'firebase/firestore';
 import { db } from '@/config/firebase';
+import type { HistoryBlock } from '@/types/historyBlock';
 import type { RideConfirmation } from '@/types/rideConfirmation';
 import type { RideRequest } from '@/types/rideRequest';
-import type { HistoryBlock } from '@/types/historyBlock';
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  runTransaction,
+  serverTimestamp,
+  updateDoc,
+  where,
+  type Unsubscribe,
+} from 'firebase/firestore';
 import { createNotification } from './notificationService';
 
 export interface RideConfirmationWithId extends RideConfirmation {
@@ -286,4 +286,14 @@ export function subscribeToUserConfirmations(
     unsubDriver();
     unsubRider();
   };
+}
+export async function cancelReady(
+  confirmationId: string,
+  role: 'driver' | 'rider',
+): Promise<void> {
+  const field = role === 'driver' ? 'driverReady' : 'riderReady';
+  await updateDoc(doc(db, 'rideConfirmations', confirmationId), {
+    [field]: false,
+    status: 'waiting',
+  });
 }

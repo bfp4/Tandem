@@ -1,6 +1,7 @@
 import { useAuth } from '@/context/AuthContext';
 import { getOrCreateConversation } from '@/services/messagingService';
 import {
+  cancelReady,
   completeRide,
   confirmPickup,
   markReady,
@@ -383,23 +384,36 @@ const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
   }, [confirmations, enrichRides]);
 
   const { upcoming, active } = useMemo(() => {
-        const up: EnrichedRide[] = [];
-        const act: EnrichedRide[] = [];
-        for (const ride of enrichedRides) {
-          // A ride is "active" only when the server has unlocked it
-          // (within 30 min of pickup) OR it is already in progress.
-          const isActive =
-            ride.confirmation.active === true ||
-            ride.confirmation.status === 'in_progress' ||
-            ride.confirmation.status === 'both_ready';
-          if (isActive) {
-            act.push(ride);
-          } else {
-            up.push(ride);
-          }
+    const up: EnrichedRide[] = [];
+    const act: EnrichedRide[] = [];
+    const now = new Date();
+  
+    for (const ride of enrichedRides) {
+      const isActive =
+        ride.confirmation.active === true ||
+        ride.confirmation.status === 'in_progress' ||
+        ride.confirmation.status === 'both_ready';
+  
+      if (isActive) {
+        act.push(ride);
+      } else {
+        // Build a Date from the ride's date + requestedEnd time
+        const [endH, endM] = (ride.request.requestedEnd ?? '').split(':').map(Number);
+        const rideEnd = new Date(ride.confirmation.nextRideDate + 'T00:00:00');
+        rideEnd.setHours(endH || 0, endM || 0, 0, 0);
+  
+        // Skip rides that have already ended
+        if (rideEnd < now) continue;
+  
+        // Only show rides within the next 24 hours
+        const hoursUntilEnd = (rideEnd.getTime() - now.getTime()) / (1000 * 60 * 60);
+        if (hoursUntilEnd <= 24) {
+          up.push(ride);
         }
-        return { upcoming: up, active: act };
-      }, [enrichedRides]);
+      }
+    }
+    return { upcoming: up, active: act };
+  }, [enrichedRides]);
     
 // Calculate the distance as rider moves towards the dropoff location with eta calculation
 useEffect(() => {
@@ -473,6 +487,18 @@ useEffect(() => {
       await markReady(ride.confirmation.id, myRole);
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Could not mark ready.');
+    } finally {
+      setActingOn(null);
+    }
+  };
+
+  const handleCancelReady = async (ride: EnrichedRide) => {
+    if (!myRole) return;
+    setActingOn(ride.confirmation.id);
+    try {
+      await cancelReady(ride.confirmation.id, myRole);
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'Could not cancel ready status.');
     } finally {
       setActingOn(null);
     }
@@ -732,11 +758,11 @@ useEffect(() => {
         </View>
       );
     }
-
+  
     interface ViewScheduleButtonProps {
       onPress: () => void;
     }
-
+  
     function ViewScheduleButton({ onPress }: ViewScheduleButtonProps) {
       return (
         <TouchableOpacity style={scheduleStyles.button} onPress={onPress}>
@@ -746,7 +772,7 @@ useEffect(() => {
         </TouchableOpacity>
       );
     }
-
+  
     const scheduleStyles = StyleSheet.create({
       button: {
         flexDirection: 'row',
@@ -765,20 +791,38 @@ useEffect(() => {
         color: '#007AFF',
       },
     });
-
-    
+  
     return (
-      <><ViewScheduleButton
-        onPress={() => router.push({
-          pathname: '/(tabs)/history',
-        })} />
-        <ScrollView style={styles.upcomingList} contentContainerStyle={styles.upcomingContent} showsVerticalScrollIndicator={false}>
+      <>
+        <ViewScheduleButton
+          onPress={() => router.push({ pathname: '/(tabs)/history' })}
+        />
+        <ScrollView
+          style={styles.upcomingList}
+          contentContainerStyle={styles.upcomingContent}
+          showsVerticalScrollIndicator={false}
+        >
           <UpcomingMapSection upcoming={upcoming} userLocation={userLocation} />
           {upcoming.map((ride) => {
-            const ready = isUserReady(ride);
-            const canConfirm = !ready;
-            const waitingOther = ready;
-
+            const isDriver = ride.confirmation.driverId === user?.uid;
+            const isRider = ride.confirmation.riderId === user?.uid;
+  
+            const driverReady = ride.confirmation.driverReady ?? false;
+            const riderReady = ride.confirmation.riderReady ?? false;
+  
+            // For the current user, are THEY ready?
+            const iAmReady = isDriver ? driverReady : riderReady;
+            // Is the OTHER party ready?
+            const otherReady = isDriver ? riderReady : driverReady;
+  
+            // Only show I'm Ready button within 30 minutes of pickup
+            const now = new Date();
+            const [startH, startM] = (ride.request.requestedStart ?? '').split(':').map(Number);
+            const rideStart = new Date(ride.confirmation.nextRideDate + 'T00:00:00');
+            rideStart.setHours(startH || 0, startM || 0, 0, 0);
+            const minutesUntilStart = (rideStart.getTime() - now.getTime()) / (1000 * 60);
+            const within30Min = minutesUntilStart <= 30 && minutesUntilStart > -60;
+  
             return (
               <View key={ride.confirmation.id} style={styles.card}>
                 <View style={styles.cardHeader}>
@@ -790,7 +834,7 @@ useEffect(() => {
                     <Text style={styles.statusText}>Scheduled</Text>
                   </View>
                 </View>
-
+  
                 <View style={styles.cardTime}>
                   <Ionicons name="time-outline" size={16} color={TEXT_SECONDARY} />
                   <Text style={styles.cardTimeText}>
@@ -798,7 +842,7 @@ useEffect(() => {
                     {formatTime24to12(ride.request.requestedEnd)}
                   </Text>
                 </View>
-
+  
                 <View style={styles.locationBlock}>
                   <View style={styles.locationRow}>
                     <View style={[styles.locationDot, { backgroundColor: GREEN }]} />
@@ -814,20 +858,23 @@ useEffect(() => {
                     </Text>
                   </View>
                 </View>
-
+  
                 <TouchableOpacity
                   style={styles.profileRow}
                   onPress={() => handleViewProfile(ride.otherUser)}
                 >
                   <RidePricingInfo
                     request={ride.request}
-                    rideDistanceMeters={geoPointToLatLng(ride.request.pickupLocation) &&
+                    rideDistanceMeters={
+                      geoPointToLatLng(ride.request.pickupLocation) &&
                       geoPointToLatLng(ride.request.dropoffLocation)
-                      ? getDistanceMeters(
-                        geoPointToLatLng(ride.request.pickupLocation)!,
-                        geoPointToLatLng(ride.request.dropoffLocation)!
-                      )
-                      : null} />
+                        ? getDistanceMeters(
+                            geoPointToLatLng(ride.request.pickupLocation)!,
+                            geoPointToLatLng(ride.request.dropoffLocation)!
+                          )
+                        : null
+                    }
+                  />
                   <View style={styles.avatarSmall}>
                     <Ionicons name="person" size={18} color="#999" />
                   </View>
@@ -842,11 +889,26 @@ useEffect(() => {
                   </View>
                   <Ionicons name="chevron-forward" size={18} color={TEXT_MUTED} />
                 </TouchableOpacity>
-
+  
                 <View style={styles.cardActions}>
-                  {canConfirm && (
+                  {/* DRIVER: auto-ready, show static waiting badge */}
+                  {isDriver && within30Min && (
+                    <View style={styles.waitingBadge}>
+                      <Ionicons name="checkmark-circle" size={16} color={GREEN} />
+                      <Text style={[styles.waitingText, { color: GREEN }]}>
+                        {otherReady ? 'Both ready!' : "You're set — waiting for rider"}
+                      </Text>
+                    </View>
+                  )}
+  
+                  {/* RIDER: manual I'm Ready, with cancel, only within 30 min */}
+                  {isRider && within30Min && !iAmReady && (
                     <TouchableOpacity
-                      style={[styles.primaryButton, styles.readyButton, actingOn === ride.confirmation.id && styles.buttonDisabled]}
+                      style={[
+                        styles.primaryButton,
+                        styles.readyButton,
+                        actingOn === ride.confirmation.id && styles.buttonDisabled,
+                      ]}
                       onPress={() => handleMarkReady(ride)}
                       disabled={actingOn === ride.confirmation.id}
                     >
@@ -860,12 +922,30 @@ useEffect(() => {
                       )}
                     </TouchableOpacity>
                   )}
-                  {waitingOther && (
-                    <View style={styles.waitingBadge}>
-                      <ActivityIndicator size="small" color={ORANGE} />
-                      <Text style={styles.waitingText}>Waiting for other party...</Text>
+  
+                  {/* RIDER: already ready — show static waiting + cancel option */}
+                  {isRider && within30Min && iAmReady && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                      <View style={[styles.waitingBadge, { flex: 1 }]}>
+                        <Ionicons name="checkmark-circle" size={16} color={GREEN} />
+                        <Text style={[styles.waitingText, { color: GREEN }]}>
+                          {otherReady ? 'Both ready!' : 'Waiting for driver...'}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.cancelReadyButton, actingOn === ride.confirmation.id && styles.buttonDisabled]}
+                        onPress={() => handleCancelReady(ride)}
+                        disabled={actingOn === ride.confirmation.id}
+                      >
+                        {actingOn === ride.confirmation.id ? (
+                          <ActivityIndicator color={RED} size="small" />
+                        ) : (
+                          <Text style={styles.cancelReadyText}>Cancel</Text>
+                        )}
+                      </TouchableOpacity>
                     </View>
                   )}
+  
                   <TouchableOpacity
                     style={styles.messageChip}
                     onPress={() => handleMessage(ride.otherUser.uid)}
@@ -877,7 +957,8 @@ useEffect(() => {
               </View>
             );
           })}
-        </ScrollView></>
+        </ScrollView>
+      </>
     );
   };
 
@@ -1344,6 +1425,18 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 14,
+  },
+  cancelReadyButton: {
+    borderWidth: 1.5,
+    borderColor: RED,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  cancelReadyText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: RED,
   },
   waitingText: {
     fontSize: 13,
