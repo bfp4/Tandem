@@ -1,6 +1,11 @@
 import { useAuth } from '@/context/AuthContext';
 import { getMatchedUsers, type MatchResult } from '@/services/matchingService';
-import { addBlockedAccount, addFavorite, getUser } from '@/services/userService';
+import {
+  addBlockedAccount,
+  addFavorite,
+  getBlockedAccountIds,
+  getUser,
+} from '@/services/userService';
 import type { User } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -36,6 +41,7 @@ export default function MatchScreen() {
   const [hasLocation, setHasLocation] = useState(false);
   const locationRef = useRef<{ lat: number; lng: number } | null>(null);
 
+  const [blockedFilterMessage, setBlockedFilterMessage] = useState('');
   const [openMenuForUserId, setOpenMenuForUserId] = useState<string | null>(null);
   const [actionMenuMessage, setActionMenuMessage] = useState('');
   const closeMenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -98,7 +104,26 @@ export default function MatchScreen() {
         role,
         maxDistance,
       );
-      setResults(matched);
+      let blockedIds: string[] = [];
+      if (user?.uid) {
+        try {
+          blockedIds = await getBlockedAccountIds(user.uid);
+        } catch (error) {
+          setBlockedFilterMessage('Could not load blocked accounts — showing all matches.');
+          setTimeout(() => setBlockedFilterMessage(''), 2500);
+        }
+      }
+
+      if (blockedIds.length > 0) {
+        const blockedSet = new Set(blockedIds);
+        const filtered = matched.filter((r) => {
+          const id = (r.user as any)?.uid ?? (r.user as any)?.id;
+          return typeof id === 'string' ? !blockedSet.has(id) : true;
+        });
+        setResults(filtered);
+      } else {
+        setResults(matched);
+      }
     } catch {
     } finally {
       setLoading(false);
@@ -364,6 +389,10 @@ export default function MatchScreen() {
         </TouchableOpacity>
       </View>
 
+      {blockedFilterMessage ? (
+        <Text style={styles.blockedFilterMessage}>{blockedFilterMessage}</Text>
+      ) : null}
+
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#007AFF" />
@@ -501,6 +530,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
     gap: 8,
+  },
+  blockedFilterMessage: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    color: '#666',
+    fontSize: 12,
   },
   searchBar: {
     flex: 1,

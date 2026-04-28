@@ -3,6 +3,7 @@ import type { HistoryBlock } from '@/types/historyBlock';
 import type { User } from '@/types/user';
 import {
     collection,
+    deleteDoc,
     doc,
     getDoc,
     getDocs,
@@ -37,6 +38,13 @@ export async function getUser(userId: string): Promise<User> {
 export type FavoriteTargetUser = Pick<User, 'name' | 'activeRole'> & {
   uid?: string;
   id?: string;
+};
+
+export type SavedAccountRef = {
+  targetUid: string;
+  name: string;
+  activeRole: string | null;
+  createdAt?: unknown;
 };
 
 export async function addFavorite(
@@ -95,6 +103,49 @@ export async function addBlockedAccount(
     const suffix = `${code ? ` (${code})` : ''}${projectId ? ` [projectId:${projectId}]` : ''}`;
     throw new Error(`${message}${suffix}`);
   }
+}
+
+export async function getFavorites(currentUid: string): Promise<SavedAccountRef[]> {
+  const snap = await getDocs(collection(db, 'users', currentUid, 'favorites'));
+  const rows = snap.docs.map((d) => d.data() as Partial<SavedAccountRef>);
+  return rows
+    .filter((r): r is SavedAccountRef => typeof r.targetUid === 'string' && typeof r.name === 'string')
+    .sort((a, b) => {
+      const ta = (a.createdAt as any)?.toMillis?.() ?? 0;
+      const tb = (b.createdAt as any)?.toMillis?.() ?? 0;
+      return tb - ta;
+    });
+}
+
+export async function removeFavorite(currentUid: string, targetUid: string): Promise<void> {
+  await deleteDoc(doc(db, 'users', currentUid, 'favorites', targetUid));
+}
+
+export async function getBlockedAccounts(currentUid: string): Promise<SavedAccountRef[]> {
+  const snap = await getDocs(collection(db, 'users', currentUid, 'blockedAccounts'));
+  const rows = snap.docs.map((d) => d.data() as Partial<SavedAccountRef>);
+  return rows
+    .filter((r): r is SavedAccountRef => typeof r.targetUid === 'string' && typeof r.name === 'string')
+    .sort((a, b) => {
+      const ta = (a.createdAt as any)?.toMillis?.() ?? 0;
+      const tb = (b.createdAt as any)?.toMillis?.() ?? 0;
+      return tb - ta;
+    });
+}
+
+export async function getBlockedAccountIds(currentUid: string): Promise<string[]> {
+  const snap = await getDocs(collection(db, 'users', currentUid, 'blockedAccounts'));
+  const ids = new Set<string>();
+  for (const d of snap.docs) {
+    ids.add(d.id);
+    const data = d.data() as any;
+    if (typeof data?.targetUid === 'string') ids.add(data.targetUid);
+  }
+  return [...ids];
+}
+
+export async function removeBlockedAccount(currentUid: string, targetUid: string): Promise<void> {
+  await deleteDoc(doc(db, 'users', currentUid, 'blockedAccounts', targetUid));
 }
 
 export async function updateUser(

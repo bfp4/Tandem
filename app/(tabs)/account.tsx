@@ -3,7 +3,15 @@ import {
   changeEmailWithCurrentPassword,
   changePasswordWithCurrentPassword,
 } from '@/services/authService';
-import { updateUser, updateUserPreferences } from '@/services/userService';
+import {
+  getBlockedAccounts,
+  getFavorites,
+  removeBlockedAccount,
+  removeFavorite,
+  type SavedAccountRef,
+  updateUser,
+  updateUserPreferences,
+} from '@/services/userService';
 import type { AppearancePreference, GenderPreference } from '@/types/user';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -59,11 +67,41 @@ export default function AccountScreen() {
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
 
+  // App Activity (Favorites + Blocked Accounts)
+  const [favorites, setFavorites] = useState<SavedAccountRef[]>([]);
+  const [blockedAccounts, setBlockedAccounts] = useState<SavedAccountRef[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityMessage, setActivityMessage] = useState('');
+
 
 
   useEffect(() => {
     loadProfile();
   }, [user]);
+
+  useEffect(() => {
+    if (!accountCenterVisible) return;
+    if (accountCenterView !== 'activity') return;
+    void loadActivity();
+  }, [accountCenterVisible, accountCenterView, user?.uid]);
+
+  const loadActivity = async () => {
+    if (!user?.uid) return;
+    setActivityLoading(true);
+    try {
+      const [fav, blocked] = await Promise.all([
+        getFavorites(user.uid),
+        getBlockedAccounts(user.uid),
+      ]);
+      setFavorites(fav);
+      setBlockedAccounts(blocked);
+    } catch (error: any) {
+      setActivityMessage(error?.message ? String(error.message) : 'Failed to load activity');
+      setTimeout(() => setActivityMessage(''), 3000);
+    } finally {
+      setActivityLoading(false);
+    }
+  };
 
   const loadProfile = async () => {
     if (!user) return;
@@ -298,14 +336,32 @@ export default function AccountScreen() {
     setTimeout(() => setTemporaryMessage(''), 2500);
   };
 
-  const handleFavoritesPress = () => {
-    setTemporaryMessage('Favorites are not connected yet.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
+  const handleRemoveFavorite = async (targetUid: string) => {
+    if (!user?.uid) return;
+    try {
+      await removeFavorite(user.uid, targetUid);
+      setFavorites((prev) => prev.filter((f) => f.targetUid !== targetUid));
+      setActivityMessage('Removed from favorites');
+      setTimeout(() => setActivityMessage(''), 2000);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setActivityMessage(`Failed to remove favorite: ${message}`);
+      setTimeout(() => setActivityMessage(''), 3000);
+    }
   };
 
-  const handleBlockedAccountsPress = () => {
-    setTemporaryMessage('Blocked accounts are not connected yet.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
+  const handleUnblockAccount = async (targetUid: string) => {
+    if (!user?.uid) return;
+    try {
+      await removeBlockedAccount(user.uid, targetUid);
+      setBlockedAccounts((prev) => prev.filter((b) => b.targetUid !== targetUid));
+      setActivityMessage('Unblocked account');
+      setTimeout(() => setActivityMessage(''), 2000);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setActivityMessage(`Failed to unblock account: ${message}`);
+      setTimeout(() => setActivityMessage(''), 3000);
+    }
   };
 
   const handleNotificationsSettingsPress = () => {
@@ -360,6 +416,10 @@ export default function AccountScreen() {
 
   const handleBackToPreferencesMenu = () => {
     setAccountCenterView('preferences');
+  };
+
+  const handleBackToAppActivity = () => {
+    setAccountCenterView('activity');
   };
 
   const handleSavePreferences = async () => {
@@ -819,17 +879,95 @@ export default function AccountScreen() {
                   <Ionicons name="chevron-forward" size={20} color="#999" />
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handleFavoritesPress}>
-                  <Text style={styles.modalMenuText}>Favorited Drivers / Passengers</Text>
+                <TouchableOpacity
+                  style={styles.modalMenuItem}
+                  onPress={() => setAccountCenterView('activity_favorites')}
+                >
+                  <Text style={styles.modalMenuText}>Favorites</Text>
                   <Ionicons name="chevron-forward" size={20} color="#999" />
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handleBlockedAccountsPress}>
+                <TouchableOpacity
+                  style={styles.modalMenuItem}
+                  onPress={() => setAccountCenterView('activity_blocked')}
+                >
                   <Text style={styles.modalMenuText}>Blocked Accounts</Text>
                   <Ionicons name="chevron-forward" size={20} color="#999" />
                 </TouchableOpacity>
               </>             
             )} 
+
+            {accountCenterView === 'activity_favorites' && (
+              <>
+                <TouchableOpacity style={styles.backRow} onPress={handleBackToAppActivity}>
+                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
+                  <Text style={styles.backRowText}>Back to App Activity</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.subSectionTitle}>Favorites</Text>
+
+                {activityMessage ? (
+                  <Text style={styles.activityMessage}>{activityMessage}</Text>
+                ) : null}
+
+                {activityLoading ? (
+                  <Text style={styles.activitySubtle}>Loading...</Text>
+                ) : favorites.length === 0 ? (
+                  <Text style={styles.activitySubtle}>No favorites yet.</Text>
+                ) : (
+                  favorites.map((f) => (
+                    <View key={f.targetUid} style={styles.activityRow}>
+                      <View style={styles.activityRowLeft}>
+                        <Text style={styles.activityName}>{f.name}</Text>
+                        <Text style={styles.activityRole}>{f.activeRole ?? '—'}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.activityActionButton}
+                        onPress={() => handleRemoveFavorite(f.targetUid)}
+                      >
+                        <Text style={styles.activityActionText}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))
+                )}
+              </>
+            )}
+
+            {accountCenterView === 'activity_blocked' && (
+              <>
+                <TouchableOpacity style={styles.backRow} onPress={handleBackToAppActivity}>
+                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
+                  <Text style={styles.backRowText}>Back to App Activity</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.subSectionTitle}>Blocked Accounts</Text>
+
+                {activityMessage ? (
+                  <Text style={styles.activityMessage}>{activityMessage}</Text>
+                ) : null}
+
+                {activityLoading ? (
+                  <Text style={styles.activitySubtle}>Loading...</Text>
+                ) : blockedAccounts.length === 0 ? (
+                  <Text style={styles.activitySubtle}>No blocked accounts.</Text>
+                ) : (
+                  blockedAccounts.map((b) => (
+                    <View key={b.targetUid} style={styles.activityRow}>
+                      <View style={styles.activityRowLeft}>
+                        <Text style={styles.activityName}>{b.name}</Text>
+                        <Text style={styles.activityRole}>{b.activeRole ?? '—'}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.activityActionButton, styles.activityUnblockButton]}
+                        onPress={() => handleUnblockAccount(b.targetUid)}
+                      >
+                        <Text style={styles.activityActionText}>Unblock</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))
+                )}
+              </>
+            )}
             {accountCenterView === 'preferences' && (
               <>
                 <TouchableOpacity style={styles.backRow} onPress={handleBackToAccountCenterMenu}>
@@ -1241,6 +1379,66 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
     fontWeight: '500',
+  },
+  activityMessage: {
+    marginTop: 10,
+    marginBottom: 6,
+    fontSize: 13,
+    color: '#333',
+  },
+  activitySectionTitle: {
+    marginTop: 16,
+    marginBottom: 8,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#333',
+  },
+  activitySubtle: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 8,
+  },
+  activityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  activityRowLeft: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  activityName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#333',
+  },
+  activityRole: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#666',
+  },
+  activityActionButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+  },
+  activityUnblockButton: {
+    backgroundColor: '#f5f5f5',
+  },
+  activityActionText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#333',
   },
     backRow: {
     flexDirection: 'row',
