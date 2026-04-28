@@ -6,7 +6,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDoc,
   getDocs,
   increment,
   onSnapshot,
@@ -78,17 +77,18 @@ async function ensureConversationExists(
   uid1: string,
   uid2: string,
 ): Promise<void> {
+  // Only called when isPending=true, meaning the document is guaranteed not to
+  // exist yet. Skipping the getDoc check avoids a permission-denied error:
+  // Firestore's `get` rule requires resource.data.participants, but `resource`
+  // is null for non-existent docs, so the rule always denies those reads.
   const ref = doc(db, 'conversations', conversationId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
-    const conversation: Conversation = {
-      participants: [uid1, uid2],
-      lastMessage: '',
-      lastMessageAt: null,
-      unreadCounts: { [uid1]: 0, [uid2]: 0 },
-    };
-    await setDoc(ref, conversation);
-  }
+  const conversation: Conversation = {
+    participants: [uid1, uid2],
+    lastMessage: '',
+    lastMessageAt: null,
+    unreadCounts: { [uid1]: 0, [uid2]: 0 },
+  };
+  await setDoc(ref, conversation);
 }
 
 /**

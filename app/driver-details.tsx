@@ -1,82 +1,47 @@
 import { useAuth } from '@/context/AuthContext';
 import { getOrCreateConversation } from '@/services/messagingService';
+import type { RideMatchInfo } from '@/services/matchingService';
 import { createNotification } from '@/services/notificationService';
 import { createRideRequest } from '@/services/rideRequestService';
-import { calculateDriveTime, formatDriveTime } from '@/utils/driveTime';
 import { Ionicons } from '@expo/vector-icons';
+import { GeoPoint } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { GeoPoint, doc, getDoc } from 'firebase/firestore';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { db } from '../config/firebase';
 
-interface AddressSuggestion {
-  place_id: number;
-  display_name: string;
-  lat: string;
-  lon: string;
+const FULL_DAY: Record<string, string> = {
+  Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday',
+  Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday',
+};
+
+function format12h(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  const period = h < 12 ? 'AM' : 'PM';
+  const hours = h % 12 === 0 ? 12 : h % 12;
+  return `${hours}:${String(m).padStart(2, '0')} ${period}`;
 }
 
-interface ResolvedLocation {
-  text: string;
-  lat: number;
-  lng: number;
-}
-
-interface TimeSlot {
-  day: string;
-  time: string;
-  available: boolean;
-}
-
-const DAYS_OF_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const TIME_SLOTS = [
-  '12:00 AM','12:15 AM','12:30 AM','12:45 AM',
-  '1:00 AM','1:15 AM','1:30 AM','1:45 AM',
-  '2:00 AM','2:15 AM','2:30 AM','2:45 AM',
-  '3:00 AM','3:15 AM','3:30 AM','3:45 AM',
-  '4:00 AM','4:15 AM','4:30 AM','4:45 AM',
-  '5:00 AM','5:15 AM','5:30 AM','5:45 AM',
-  '6:00 AM','6:15 AM','6:30 AM','6:45 AM',
-  '7:00 AM','7:15 AM','7:30 AM','7:45 AM',
-  '8:00 AM','8:15 AM','8:30 AM','8:45 AM',
-  '9:00 AM','9:15 AM','9:30 AM','9:45 AM',
-  '10:00 AM','10:15 AM','10:30 AM','10:45 AM',
-  '11:00 AM','11:15 AM','11:30 AM','11:45 AM',
-  '12:00 PM','12:15 PM','12:30 PM','12:45 PM',
-  '1:00 PM','1:15 PM','1:30 PM','1:45 PM',
-  '2:00 PM','2:15 PM','2:30 PM','2:45 PM',
-  '3:00 PM','3:15 PM','3:30 PM','3:45 PM',
-  '4:00 PM','4:15 PM','4:30 PM','4:45 PM',
-  '5:00 PM','5:15 PM','5:30 PM','5:45 PM',
-  '6:00 PM','6:15 PM','6:30 PM','6:45 PM',
-  '7:00 PM','7:15 PM','7:30 PM','7:45 PM',
-  '8:00 PM','8:15 PM','8:30 PM','8:45 PM',
-  '9:00 PM','9:15 PM','9:30 PM','9:45 PM',
-  '10:00 PM','10:15 PM','10:30 PM','10:45 PM',
-  '11:00 PM','11:15 PM','11:30 PM','11:45 PM',
-];
-
-/** Returns only the time slots where both schedules are available, trimmed to the range used. */
-function getOverlapTimes(scheduleA: TimeSlot[], scheduleB: TimeSlot[]): string[] {
-  const setA = new Set(scheduleA.filter(s => s.available).map(s => `${s.day}-${s.time}`));
-  const setB = new Set(scheduleB.filter(s => s.available).map(s => `${s.day}-${s.time}`));
-  const overlap = new Set([...setA].filter(k => setB.has(k)));
-  if (overlap.size === 0) return [];
-  return TIME_SLOTS.filter(t =>
-    DAYS_OF_WEEK.some(d => overlap.has(`${d}-${t}`))
-  );
+/** "YYYY-MM-DD" of the nearest future occurrence of a short day name ("Mon", etc.) */
+function nextDateForDay(dayShort: string): string {
+  const DAY_MAP: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  };
+  const target = DAY_MAP[dayShort] ?? 0;
+  const now = new Date();
+  const daysAhead = ((target - now.getDay() + 7) % 7) || 7;
+  const d = new Date(now);
+  d.setDate(now.getDate() + daysAhead);
+  return d.toISOString().slice(0, 10);
 }
 
 export default function DriverDetailsScreen() {
@@ -84,188 +49,111 @@ export default function DriverDetailsScreen() {
   const { user } = useAuth();
   const params = useLocalSearchParams();
 
-  const driverId = params.id as string;
-  const driverName = params.name as string || 'Driver';
+  const otherId = params.id as string;
+  const otherName = (params.name as string) || 'User';
   const rating = parseFloat(params.rating as string) || 0;
   const totalRides = parseInt(params.totalRides as string) || 0;
-  const bio = params.bio as string || '';
-  const distance = params.distance as string || '';
-  const score = params.score as string || '';
-  const scheduleOverlap = params.scheduleOverlap as string || '';
+  const bio = (params.bio as string) || '';
+  const distance = (params.distance as string) || '';
+  const score = (params.score as string) || '';
+  const myRole = (params.myRole as string) || 'rider';
 
-  const [driverSchedule, setDriverSchedule] = useState<TimeSlot[]>([]);
-  const [mySchedule, setMySchedule] = useState<TimeSlot[]>([]);
-  const [overlapTimes, setOverlapTimes] = useState<string[]>([]);
-  const [loadingSchedule, setLoadingSchedule] = useState(true);
+  let matchingRides: RideMatchInfo[] = [];
+  try {
+    matchingRides = JSON.parse((params.matchingRides as string) ?? '[]');
+  } catch {
+    matchingRides = [];
+  }
 
-  const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
-  const [sideBoxVisible, setSideBoxVisible] = useState(false);
-  const [pickup, setPickup] = useState<ResolvedLocation | null>(null);
-  const [dropoff, setDropoff] = useState<ResolvedLocation | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [estimatedDriveTime, setEstimatedDriveTime] = useState<number | null>(null);
-  const [calculatingDriveTime, setCalculatingDriveTime] = useState(false);
-
-  // Address lookup modal state
-  const [addressModalVisible, setAddressModalVisible] = useState(false);
-  const [addressModalTarget, setAddressModalTarget] = useState<'pickup' | 'dropoff'>('pickup');
-  const [addressQuery, setAddressQuery] = useState('');
-  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
-  const [addressLoading, setAddressLoading] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const openAddressModal = (target: 'pickup' | 'dropoff') => {
-    setAddressModalTarget(target);
-    setAddressQuery('');
-    setAddressSuggestions([]);
-    setAddressModalVisible(true);
-  };
-
-  const onAddressQueryChange = useCallback((text: string) => {
-    setAddressQuery(text);
-    setAddressSuggestions([]);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (text.trim().length < 3) return;
-
-    debounceRef.current = setTimeout(async () => {
-      setAddressLoading(true);
-      try {
-        const encoded = encodeURIComponent(text.trim());
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&addressdetails=1&limit=6`,
-          { headers: { 'Accept-Language': 'en', 'User-Agent': 'HuberApp/1.0' } },
-        );
-        const data: AddressSuggestion[] = await res.json();
-        setAddressSuggestions(data);
-      } catch {
-        // ignore
-      } finally {
-        setAddressLoading(false);
-      }
-    }, 400);
-  }, []);
-
-  const selectSuggestion = (s: AddressSuggestion) => {
-    const resolved: ResolvedLocation = {
-      text: s.display_name,
-      lat: parseFloat(s.lat),
-      lng: parseFloat(s.lon),
-    };
-    if (addressModalTarget === 'pickup') setPickup(resolved);
-    else setDropoff(resolved);
-    setAddressModalVisible(false);
-  };
+  // Track which riderRideIds already have a pending request so we don't duplicate
+  const [requestedRideIds, setRequestedRideIds] = useState<Set<string>>(new Set());
+  const [submittingRideId, setSubmittingRideId] = useState<string | null>(null);
+  const [loadingRequests, setLoadingRequests] = useState(true);
 
   useEffect(() => {
-    loadSchedules();
-  }, [driverId, user]);
+    if (!user) { setLoadingRequests(false); return; }
+    checkExistingRequests();
+  }, [user, otherId]);
 
-  useEffect(() => {
-    const calculateEstimate = async () => {
-      if (!pickup || !dropoff) {
-        setEstimatedDriveTime(null);
-        return;
-      }
-
-      setCalculatingDriveTime(true);
-      try {
-        const driveTime = await calculateDriveTime(
-          { latitude: pickup.lat, longitude: pickup.lng },
-          { latitude: dropoff.lat, longitude: dropoff.lng }
-        );
-        setEstimatedDriveTime(driveTime);
-      } catch (error) {
-        console.warn('Failed to calculate drive time:', error);
-        setEstimatedDriveTime(null);
-      } finally {
-        setCalculatingDriveTime(false);
-      }
-    };
-
-    calculateEstimate();
-  }, [pickup, dropoff]);
-
-  const loadSchedules = async () => {
-    if (!driverId || !user) return;
-    setLoadingSchedule(true);
+  const checkExistingRequests = async () => {
+    if (!user) return;
     try {
-      const [driverSnap, mySnap] = await Promise.all([
-        getDoc(doc(db, 'users', driverId)),
-        getDoc(doc(db, 'users', user.uid)),
+      // Query by riderId only (single-field, no composite index) and filter in memory.
+      // We check both orientations so we catch requests that either party created.
+      const riderId1 = myRole === 'rider' ? user.uid : otherId;
+      const driverId1 = myRole === 'rider' ? otherId : user.uid;
+      const riderId2 = myRole === 'rider' ? otherId : user.uid;
+      const driverId2 = myRole === 'rider' ? user.uid : otherId;
+
+      const [snap1, snap2] = await Promise.all([
+        getDocs(query(collection(db, 'rideRequests'), where('riderId', '==', riderId1))),
+        getDocs(query(collection(db, 'rideRequests'), where('riderId', '==', riderId2))),
       ]);
-      const driverSched: TimeSlot[] = driverSnap.exists() ? (driverSnap.data().schedule ?? []) : [];
-      const mySched: TimeSlot[] = mySnap.exists() ? (mySnap.data().schedule ?? []) : [];
-      setDriverSchedule(driverSched);
-      setMySchedule(mySched);
-      setOverlapTimes(getOverlapTimes(driverSched, mySched));
+
+      const alreadyRequestedIds = new Set<string>();
+      snap1.docs.forEach(d => {
+        const data = d.data();
+        if (data.driverId === driverId1 &&
+            (data.status === 'pending' || data.status === 'confirmed') &&
+            data.riderRideId) {
+          alreadyRequestedIds.add(data.riderRideId as string);
+        }
+      });
+      snap2.docs.forEach(d => {
+        const data = d.data();
+        if (data.driverId === driverId2 &&
+            (data.status === 'pending' || data.status === 'confirmed') &&
+            data.riderRideId) {
+          alreadyRequestedIds.add(data.riderRideId as string);
+        }
+      });
+      setRequestedRideIds(alreadyRequestedIds);
     } catch (e) {
-      console.error('Error loading schedules:', e);
+      console.warn('Could not load existing requests:', e);
     } finally {
-      setLoadingSchedule(false);
+      setLoadingRequests(false);
     }
   };
 
-  const getSlot = (day: string, time: string): TimeSlot | undefined => {
-    const driverAvail = driverSchedule.find(s => s.day === day && s.time === time)?.available ?? false;
-    const myAvail = mySchedule.find(s => s.day === day && s.time === time)?.available ?? false;
-    return { day, time, available: driverAvail && myAvail };
-  };
+  const handleRequestMatch = async (ride: RideMatchInfo) => {
+    if (!user) return;
 
-  const handleSlotPress = (slot: TimeSlot) => {
-    if (!slot.available) {
-      Alert.alert('Unavailable', 'This time slot is not available for both of you.');
-      return;
-    }
-    setSelectedSlot(slot);
-    setSideBoxVisible(true);
-  };
+    const riderId = myRole === 'rider' ? user.uid : otherId;
+    const driverId = myRole === 'rider' ? otherId : user.uid;
+    const initiatedBy = myRole as 'rider' | 'driver';
+    const notifyUserId = myRole === 'rider' ? driverId : riderId;
 
-  const handleRequestRide = async () => {
-    if (!selectedSlot || !user || !driverId) return;
-    if (!pickup || !dropoff) {
-      Alert.alert('Missing info', 'Please select both a pickup and drop-off location.');
-      return;
-    }
-
-    setSubmitting(true);
+    setSubmittingRideId(ride.riderRideId);
     try {
-      const timeIndex = TIME_SLOTS.indexOf(selectedSlot.time);
-      const endIndex = Math.min(timeIndex + 4, TIME_SLOTS.length - 1);
-      const requestedStart = to24Hour(selectedSlot.time);
-      const requestedEnd = to24Hour(TIME_SLOTS[endIndex]);
-      const rideDate = getNextDateForDay(selectedSlot.day);
-
       const requestId = await createRideRequest({
-        scheduleBlockId: `${driverId}_${selectedSlot.day}_${selectedSlot.time}`,
+        scheduleBlockId: '',
         driverId,
-        riderId: user.uid,
-        requestedStart,
-        requestedEnd,
-        date: rideDate,
-        pickupLocation: new GeoPoint(pickup.lat, pickup.lng),
-        dropoffLocation: new GeoPoint(dropoff.lat, dropoff.lng),
-        repeating: false,
-        repeatDays: null,
+        riderId,
+        riderRideId: ride.riderRideId,
+        initiatedBy,
+        requestedStart: ride.departureTime,
+        requestedEnd: ride.arrivalTime,
+        date: nextDateForDay(ride.day),
+        pickupLocation: new GeoPoint(ride.pickupLat, ride.pickupLng),
+        dropoffLocation: new GeoPoint(ride.dropoffLat, ride.dropoffLng),
+        repeating: true,
+        repeatDays: [ride.day],
         repeatEndsAt: null,
         seriesId: null,
       });
 
-      await createNotification(
-        driverId,
-        'ride_requested',
-        requestId,
-        `You have a new ride request from ${user.displayName || 'a rider'} for ${selectedSlot.day} at ${selectedSlot.time}.`,
-      );
+      const notifyMsg = myRole === 'rider'
+        ? `${user.displayName || 'A rider'} wants to request a ride for ${FULL_DAY[ride.day] ?? ride.day} at ${format12h(ride.departureTime)}.`
+        : `${user.displayName || 'A driver'} wants to drive you on ${FULL_DAY[ride.day] ?? ride.day} at ${format12h(ride.departureTime)}.`;
 
-      setSideBoxVisible(false);
-      setPickup(null);
-      setDropoff(null);
-      setSelectedSlot(null);
-      Alert.alert('Request sent!', `Your ride request for ${selectedSlot.day} at ${selectedSlot.time} has been sent to ${driverName}.`);
+      await createNotification(notifyUserId, 'ride_requested', requestId, notifyMsg);
+
+      setRequestedRideIds(prev => new Set([...prev, ride.riderRideId]));
+      Alert.alert('Request sent!', `Your match request has been sent to ${otherName}.`);
     } catch (e: any) {
-      Alert.alert('Error', e.message ?? 'Could not send ride request. Please try again.');
+      Alert.alert('Error', e.message ?? 'Could not send match request.');
     } finally {
-      setSubmitting(false);
+      setSubmittingRideId(null);
     }
   };
 
@@ -275,15 +163,17 @@ export default function DriverDetailsScreen() {
       return;
     }
     try {
-      const { conversationId, isPending } = await getOrCreateConversation(user.uid, driverId);
+      const { conversationId, isPending } = await getOrCreateConversation(user.uid, otherId);
       router.push({
         pathname: '/conversation/[id]',
-        params: { id: conversationId, otherUserId: driverId, pending: isPending ? 'true' : 'false' },
+        params: { id: conversationId, otherUserId: otherId, pending: isPending ? 'true' : 'false' },
       });
     } catch {
       Alert.alert('Error', 'Could not open conversation. Please try again.');
     }
   };
+
+  const profileLabel = myRole === 'rider' ? 'Driver Profile' : 'Rider Profile';
 
   return (
     <View style={styles.container}>
@@ -291,17 +181,18 @@ export default function DriverDetailsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Driver Profile</Text>
+        <Text style={styles.headerTitle}>{profileLabel}</Text>
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        {/* ── Profile ── */}
         <View style={styles.profileSection}>
           <View style={styles.avatarLarge}>
             <Ionicons name="person" size={48} color="#999" />
           </View>
 
-          <Text style={styles.driverName}>{driverName}</Text>
+          <Text style={styles.driverName}>{otherName}</Text>
 
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
@@ -333,12 +224,14 @@ export default function DriverDetailsScreen() {
             ) : null}
           </View>
 
-          {scheduleOverlap ? (
-            <View style={styles.overlapBadge}>
-              <Ionicons name="time" size={14} color="#34C759" />
-              <Text style={styles.overlapBadgeText}>{scheduleOverlap}% schedule overlap</Text>
+          {matchingRides.length > 0 && (
+            <View style={styles.ridesBadge}>
+              <Ionicons name="calendar" size={14} color="#007AFF" />
+              <Text style={styles.ridesBadgeText}>
+                {matchingRides.length} compatible ride{matchingRides.length !== 1 ? 's' : ''}
+              </Text>
             </View>
-          ) : null}
+          )}
 
           {bio ? <Text style={styles.bioText}>{bio}</Text> : null}
 
@@ -348,232 +241,96 @@ export default function DriverDetailsScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.scheduleSection}>
-          <Text style={styles.sectionTitle}>Shared Availability</Text>
+        {/* ── Compatible Rides ── */}
+        <View style={styles.ridesSection}>
+          <Text style={styles.sectionTitle}>Compatible Rides</Text>
           <Text style={styles.sectionSubtitle}>
-            {overlapTimes.length > 0
-              ? 'Green slots are times you both are available — tap one to request a ride'
-              : 'No overlapping availability found. Update your schedule to find common times.'}
+            {matchingRides.length > 0
+              ? 'Tap a ride to send a match request.'
+              : myRole === 'rider'
+                ? 'No schedule overlap yet. Add rides in your Schedule tab to find matches.'
+                : 'No schedule overlap yet. Add availability in your Schedule tab to find matches.'}
           </Text>
 
-          {loadingSchedule ? (
-            <ActivityIndicator color="#007AFF" style={{ marginVertical: 24 }} />
+          {loadingRequests ? (
+            <ActivityIndicator color="#007AFF" style={{ marginVertical: 16 }} />
           ) : (
-            <View style={styles.scheduleRow}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.scheduleScroll}
-              >
-                <View style={styles.scheduleGrid}>
-                  <View style={styles.timeColumn}>
-                    <View style={styles.dayHeaderCell} />
-                    {overlapTimes.map(time => (
-                      <View key={time} style={styles.timeCell}>
-                        <Text style={styles.timeText}>{time}</Text>
+            matchingRides.map((ride, i) => {
+              const alreadyRequested = requestedRideIds.has(ride.riderRideId);
+              const isSubmitting = submittingRideId === ride.riderRideId;
+              return (
+                <View key={i} style={styles.rideCard}>
+                  <View style={styles.rideCardHeader}>
+                    <View style={styles.dayBadge}>
+                      <Text style={styles.dayBadgeText}>{FULL_DAY[ride.day] ?? ride.day}</Text>
+                    </View>
+                    {ride.estimatedDurationMinutes != null && (
+                      <View style={styles.durationBadge}>
+                        <Ionicons name="time-outline" size={12} color="#666" />
+                        <Text style={styles.durationText}>{ride.estimatedDurationMinutes} min</Text>
                       </View>
-                    ))}
+                    )}
                   </View>
 
-                  {DAYS_OF_WEEK.map(day => (
-                    <View key={day} style={styles.dayColumn}>
-                      <View style={styles.dayHeaderCell}>
-                        <Text style={styles.dayHeaderText}>{day}</Text>
-                      </View>
-                      {overlapTimes.map(time => {
-                        const slot = getSlot(day, time);
-                        const isSelected = selectedSlot?.day === day && selectedSlot?.time === time;
-                        return (
-                          <TouchableOpacity
-                            key={`${day}-${time}`}
-                            style={[
-                              styles.slotCell,
-                              slot?.available ? styles.slotAvailable : styles.slotUnavailable,
-                              isSelected && styles.slotSelected,
-                            ]}
-                            onPress={() => slot && handleSlotPress(slot)}
-                          >
-                            {slot?.available ? (
-                              <Ionicons name={isSelected ? 'checkmark-circle' : 'checkmark'} size={16} color="#34C759" />
-                            ) : (
-                              <Ionicons name="close" size={14} color="#ccc" />
-                            )}
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  ))}
-                </View>
-              </ScrollView>
+                  <Text style={styles.rideTime}>
+                    {format12h(ride.departureTime)}
+                    {'  →  '}
+                    {format12h(ride.arrivalTime)}
+                  </Text>
 
-              {sideBoxVisible && selectedSlot && (
-                <View style={styles.sideBox}>
-                  <View style={styles.sideBoxHeader}>
-                    <Text style={styles.sideBoxTitle} numberOfLines={2}>
-                      {selectedSlot.day} · {selectedSlot.time}
-                    </Text>
-                    <TouchableOpacity onPress={() => setSideBoxVisible(false)}>
-                      <Ionicons name="close" size={20} color="#666" />
-                    </TouchableOpacity>
+                  <View style={styles.routeContainer}>
+                    <View style={styles.routeIconCol}>
+                      <View style={styles.routeDotPickup} />
+                      <View style={styles.routeConnector} />
+                      <View style={styles.routeDotDropoff} />
+                    </View>
+                    <View style={styles.routeTextCol}>
+                      <Text style={styles.routeAddress} numberOfLines={2}>{ride.pickupAddress}</Text>
+                      <Text style={styles.routeAddress} numberOfLines={2}>{ride.dropoffAddress}</Text>
+                    </View>
                   </View>
 
-                  <Text style={styles.sideLabel}>Pickup location</Text>
                   <TouchableOpacity
-                    style={styles.locationPickerButton}
-                    onPress={() => openAddressModal('pickup')}
+                    style={[
+                      styles.requestButton,
+                      alreadyRequested && styles.requestButtonSent,
+                      (isSubmitting || alreadyRequested) && styles.requestButtonDisabled,
+                    ]}
+                    onPress={() => handleRequestMatch(ride)}
+                    disabled={isSubmitting || alreadyRequested}
+                    activeOpacity={0.75}
                   >
-                    <Ionicons name="location" size={14} color={pickup ? '#34C759' : '#999'} />
-                    <Text
-                      style={[styles.locationPickerText, pickup && styles.locationPickerTextSet]}
-                      numberOfLines={2}
-                    >
-                      {pickup ? pickup.text : 'Tap to search address'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <Text style={[styles.sideLabel, { marginTop: 8 }]}>Drop-off location</Text>
-                  <TouchableOpacity
-                    style={styles.locationPickerButton}
-                    onPress={() => openAddressModal('dropoff')}
-                  >
-                    <Ionicons name="location" size={14} color={dropoff ? '#34C759' : '#999'} />
-                    <Text
-                      style={[styles.locationPickerText, dropoff && styles.locationPickerTextSet]}
-                      numberOfLines={2}
-                    >
-                      {dropoff ? dropoff.text : 'Tap to search address'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  {pickup && dropoff && (
-                    <View style={styles.driveTimeContainer}>
-                      <Ionicons name="car-outline" size={14} color="#007AFF" />
-                      <Text style={styles.driveTimeLabel}>Est. drive time:</Text>
-                      {calculatingDriveTime ? (
-                        <ActivityIndicator size="small" color="#007AFF" />
-                      ) : (
-                        <Text style={styles.driveTimeValue}>
-                          {formatDriveTime(estimatedDriveTime)}
-                        </Text>
-                      )}
-                    </View>
-                  )}
-
-                  <TouchableOpacity
-                    style={[styles.requestButton, submitting && styles.requestButtonDisabled]}
-                    onPress={handleRequestRide}
-                    disabled={submitting}
-                  >
-                    {submitting ? (
-                      <ActivityIndicator color="#fff" size="small" />
+                    {isSubmitting ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : alreadyRequested ? (
+                      <>
+                        <Ionicons name="checkmark-circle" size={16} color="#fff" />
+                        <Text style={styles.requestButtonText}>Request Sent</Text>
+                      </>
                     ) : (
-                      <Text style={styles.requestButtonText}>Request ride</Text>
+                      <>
+                        <Ionicons name="paper-plane-outline" size={16} color="#fff" />
+                        <Text style={styles.requestButtonText}>Request Match</Text>
+                      </>
                     )}
                   </TouchableOpacity>
                 </View>
-              )}
-            </View>
+              );
+            })
           )}
 
-          {!loadingSchedule && overlapTimes.length > 0 && (
-            <View style={styles.legend}>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendBox, styles.legendAvailable]} />
-                <Text style={styles.legendText}>Both available</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendBox, styles.legendUnavailable]} />
-                <Text style={styles.legendText}>Not available</Text>
-              </View>
+          {!loadingRequests && matchingRides.length === 0 && (
+            <View style={styles.emptyRides}>
+              <Ionicons name="calendar-outline" size={40} color="#ccc" />
+              <Text style={styles.emptyRidesText}>No compatible rides</Text>
             </View>
           )}
         </View>
 
         <View style={{ height: 32 }} />
       </ScrollView>
-
-      {/* Address lookup modal */}
-      <Modal
-        visible={addressModalVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setAddressModalVisible(false)}
-      >
-        <View style={styles.addressModalOverlay}>
-          <View style={styles.addressModalContent}>
-            <View style={styles.addressModalHeader}>
-              <Text style={styles.addressModalTitle}>
-                {addressModalTarget === 'pickup' ? 'Pickup location' : 'Drop-off location'}
-              </Text>
-              <TouchableOpacity onPress={() => setAddressModalVisible(false)}>
-                <Ionicons name="close" size={26} color="#333" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.addressSearchBar}>
-              <Ionicons name="search" size={18} color="#999" />
-              <TextInput
-                style={styles.addressSearchInput}
-                placeholder="Search for an address..."
-                placeholderTextColor="#999"
-                value={addressQuery}
-                onChangeText={onAddressQueryChange}
-                autoFocus
-              />
-              {addressLoading && <ActivityIndicator size="small" color="#007AFF" />}
-            </View>
-
-            <FlatList
-              data={addressSuggestions}
-              keyExtractor={item => String(item.place_id)}
-              keyboardShouldPersistTaps="handled"
-              ListEmptyComponent={
-                addressQuery.length >= 3 && !addressLoading ? (
-                  <Text style={styles.addressEmptyText}>No results found</Text>
-                ) : null
-              }
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.addressSuggestionItem}
-                  onPress={() => selectSuggestion(item)}
-                >
-                  <Ionicons name="location-outline" size={18} color="#007AFF" />
-                  <Text style={styles.addressSuggestionText} numberOfLines={2}>
-                    {item.display_name}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            />
-          </View>
-        </View>
-      </Modal>
     </View>
   );
-}
-
-/** Returns the "YYYY-MM-DD" of the next occurrence of a day name (e.g. "Mon"). If today is that day, returns today. */
-function getNextDateForDay(dayName: string): string {
-  const DAY_INDICES: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  const targetDow = DAY_INDICES[dayName];
-  const now = new Date();
-  const currentDow = now.getDay();
-  let daysAhead = targetDow - currentDow;
-  if (daysAhead < 0) daysAhead += 7;
-  const target = new Date(now);
-  target.setDate(now.getDate() + daysAhead);
-  return target.toISOString().slice(0, 10);
-}
-
-/** Converts "7:30 AM" → "07:30", "12:00 PM" → "12:00", "1:00 PM" → "13:00" */
-function to24Hour(time12: string): string {
-  const [timePart, period] = time12.split(' ');
-  let [hours, minutes] = timePart.split(':').map(Number);
-  if (period === 'AM') {
-    if (hours === 12) hours = 0;
-  } else {
-    if (hours !== 12) hours += 12;
-  }
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
 const styles = StyleSheet.create({
@@ -604,6 +361,9 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     width: 40,
+  },
+  scrollContent: {
+    paddingBottom: 16,
   },
   profileSection: {
     backgroundColor: '#fff',
@@ -650,20 +410,20 @@ const styles = StyleSheet.create({
     height: 18,
     backgroundColor: '#e0e0e0',
   },
-  overlapBadge: {
+  ridesBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e8f5e9',
+    backgroundColor: '#EFF6FF',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
     marginBottom: 12,
     gap: 6,
   },
-  overlapBadgeText: {
+  ridesBadgeText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#34C759',
+    color: '#007AFF',
   },
   bioText: {
     fontSize: 15,
@@ -687,7 +447,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  scheduleSection: {
+  ridesSection: {
     backgroundColor: '#fff',
     padding: 16,
     marginTop: 12,
@@ -704,239 +464,117 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     lineHeight: 18,
   },
-  scheduleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  scheduleScroll: {
-    flex: 1,
-  },
-  scheduleGrid: {
-    flexDirection: 'row',
-  },
-  timeColumn: {
-    marginRight: 8,
-  },
-  dayColumn: {
-    marginRight: 4,
-  },
-  dayHeaderCell: {
-    height: 36,
-    width: 66,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    marginBottom: 4,
-  },
-  dayHeaderText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#333',
-  },
-  timeCell: {
-    height: 28,
-    width: 88,
-    justifyContent: 'center',
-    paddingRight: 8,
-    marginBottom: 4,
-  },
-  timeText: {
-    fontSize: 10,
-    color: '#666',
-    fontWeight: '500',
-    textAlign: 'right',
-  },
-  slotCell: {
-    height: 28,
-    width: 156,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 6,
-    marginBottom: 4,
-    borderWidth: 1.5,
-  },
-  slotAvailable: {
-    backgroundColor: '#e8f5e9',
-    borderColor: '#34C759',
-  },
-  slotUnavailable: {
-    backgroundColor: '#f5f5f5',
-    borderColor: '#e0e0e0',
-  },
-  slotSelected: {
-    backgroundColor: '#d0f0db',
-    borderColor: '#28a745',
-  },
-  legend: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 16,
-    gap: 20,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  legendBox: {
-    width: 16,
-    height: 16,
-    borderRadius: 4,
-    marginRight: 6,
-    borderWidth: 1.5,
-  },
-  legendAvailable: {
-    backgroundColor: '#e8f5e9',
-    borderColor: '#34C759',
-  },
-  legendUnavailable: {
-    backgroundColor: '#f5f5f5',
-    borderColor: '#e0e0e0',
-  },
-  legendText: {
-    fontSize: 13,
-    color: '#666',
-  },
-  sideBox: {
-    width: 160,
-    marginLeft: 8,
-    padding: 12,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  sideBoxHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 10,
-    gap: 4,
-  },
-  sideBoxTitle: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#333',
-  },
-  sideLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 4,
-  },
-  locationPickerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    gap: 6,
-  },
-  locationPickerText: {
-    flex: 1,
-    fontSize: 11,
-    color: '#999',
-  },
-  locationPickerTextSet: {
-    color: '#333',
-  },
-  driveTimeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#EFF6FF',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    marginTop: 8,
-    gap: 6,
-  },
-  driveTimeLabel: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#007AFF',
-  },
-  driveTimeValue: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#007AFF',
-    marginLeft: 'auto',
-  },
-  requestButton: {
-    marginTop: 10,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#007AFF',
-    alignItems: 'center',
-  },
-  requestButtonDisabled: {
-    opacity: 0.6,
-  },
-  requestButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  addressModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  addressModalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 20,
-    maxHeight: '80%',
-  },
-  addressModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  addressModalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  addressSearchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 44,
+  rideCard: {
+    backgroundColor: '#f8faff',
+    borderRadius: 14,
+    padding: 14,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#dde8ff',
+  },
+  rideCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
     gap: 8,
   },
-  addressSearchInput: {
-    flex: 1,
-    fontSize: 15,
-    color: '#333',
+  dayBadge: {
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  addressEmptyText: {
-    textAlign: 'center',
-    color: '#999',
-    fontSize: 14,
-    paddingVertical: 24,
+  dayBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
-  addressSuggestionItem: {
+  durationBadge: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 12,
-    paddingHorizontal: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    gap: 10,
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 4,
   },
-  addressSuggestionText: {
+  durationText: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  rideTime: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1c1c1e',
+    marginBottom: 12,
+  },
+  routeContainer: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 14,
+  },
+  routeIconCol: {
+    alignItems: 'center',
+    paddingTop: 4,
+    width: 12,
+  },
+  routeDotPickup: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#007AFF',
+  },
+  routeConnector: {
     flex: 1,
+    width: 2,
+    backgroundColor: '#cce0ff',
+    marginVertical: 4,
+    minHeight: 20,
+  },
+  routeDotDropoff: {
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: '#34C759',
+  },
+  routeTextCol: {
+    flex: 1,
+    gap: 18,
+  },
+  routeAddress: {
+    fontSize: 13,
+    color: '#444',
+    lineHeight: 18,
+  },
+  requestButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  requestButtonSent: {
+    backgroundColor: '#34C759',
+  },
+  requestButtonDisabled: {
+    opacity: 0.7,
+  },
+  requestButtonText: {
+    color: '#fff',
     fontSize: 14,
-    color: '#333',
-    lineHeight: 20,
+    fontWeight: '600',
+  },
+  emptyRides: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    gap: 8,
+  },
+  emptyRidesText: {
+    fontSize: 15,
+    color: '#bbb',
+    fontWeight: '500',
   },
 });

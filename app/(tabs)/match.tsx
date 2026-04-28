@@ -7,16 +7,16 @@ import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
 const DISTANCE_STEPS = [5, 10, 15, 25, 50, 100];
@@ -87,12 +87,10 @@ export default function MatchScreen() {
     if (!profile) return;
     setLoading(true);
     try {
-      const role = profile.activeRole === 'driver' ? 'rider' : 'driver';
       const matched = await getMatchedUsers(
-        profile as any,
+        profile,
         location?.lat ?? null,
         location?.lng ?? null,
-        role,
         maxDistance,
       );
       setResults(matched);
@@ -140,7 +138,8 @@ export default function MatchScreen() {
         bio: result.user.bio ?? '',
         distance: result.distanceMiles.toFixed(1),
         score: Math.round(result.score * 100).toString(),
-        scheduleOverlap: result.scheduleOverlapPercent.toString(),
+        matchingRides: JSON.stringify(result.matchingRides),
+        myRole: currentUserProfile?.activeRole ?? 'rider',
       },
     });
   };
@@ -164,8 +163,10 @@ export default function MatchScreen() {
               {item.distanceMiles < 0.1 ? 'Nearby' : `${item.distanceMiles.toFixed(1)} mi away`}
             </Text>
             <Text style={styles.separator}>·</Text>
-            <Ionicons name="time" size={12} color="#666" />
-            <Text style={styles.detailText}>{item.scheduleOverlapPercent}% schedule match</Text>
+            <Ionicons name="calendar" size={12} color="#666" />
+            <Text style={styles.detailText}>
+              {item.matchingRides.length} matching ride{item.matchingRides.length !== 1 ? 's' : ''}
+            </Text>
           </View>
         </View>
         <View style={styles.scoreContainer}>
@@ -327,6 +328,8 @@ export default function MatchScreen() {
     </View>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {
