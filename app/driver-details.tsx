@@ -9,13 +9,13 @@ import { GeoPoint, doc, getDoc } from 'firebase/firestore';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  Pressable,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -106,6 +106,10 @@ export default function DriverDetailsScreen() {
   const [estimatedDriveTime, setEstimatedDriveTime] = useState<number | null>(null);
   const [calculatingDriveTime, setCalculatingDriveTime] = useState(false);
 
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [actionMenuMessage, setActionMenuMessage] = useState('');
+  const closeMenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Address lookup modal state
   const [addressModalVisible, setAddressModalVisible] = useState(false);
   const [addressModalTarget, setAddressModalTarget] = useState<'pickup' | 'dropoff'>('pickup');
@@ -161,6 +165,13 @@ export default function DriverDetailsScreen() {
   }, [driverId, user]);
 
   useEffect(() => {
+    return () => {
+      if (closeMenuTimerRef.current) clearTimeout(closeMenuTimerRef.current);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     const calculateEstimate = async () => {
       if (!pickup || !dropoff) {
         setEstimatedDriveTime(null);
@@ -174,8 +185,7 @@ export default function DriverDetailsScreen() {
           { latitude: dropoff.lat, longitude: dropoff.lng }
         );
         setEstimatedDriveTime(driveTime);
-      } catch (error) {
-        console.warn('Failed to calculate drive time:', error);
+      } catch {
         setEstimatedDriveTime(null);
       } finally {
         setCalculatingDriveTime(false);
@@ -198,8 +208,7 @@ export default function DriverDetailsScreen() {
       setDriverSchedule(driverSched);
       setMySchedule(mySched);
       setOverlapTimes(getOverlapTimes(driverSched, mySched));
-    } catch (e) {
-      console.error('Error loading schedules:', e);
+    } catch {
     } finally {
       setLoadingSchedule(false);
     }
@@ -213,17 +222,39 @@ export default function DriverDetailsScreen() {
 
   const handleSlotPress = (slot: TimeSlot) => {
     if (!slot.available) {
-      Alert.alert('Unavailable', 'This time slot is not available for both of you.');
       return;
     }
     setSelectedSlot(slot);
     setSideBoxVisible(true);
   };
 
+  const scheduleMenuClose = () => {
+    if (closeMenuTimerRef.current) clearTimeout(closeMenuTimerRef.current);
+    closeMenuTimerRef.current = setTimeout(() => {
+      setActionMenuOpen(false);
+      setActionMenuMessage('');
+    }, 1500);
+  };
+
+  const handleFavorite = () => {
+    const id = typeof driverId === 'string' && driverId.trim().length > 0 ? driverId : null;
+    setActionMenuMessage(
+      id ? 'Favorite is not connected yet.' : 'Unable to complete action because this user is missing an ID.',
+    );
+    scheduleMenuClose();
+  };
+
+  const handleBlock = () => {
+    const id = typeof driverId === 'string' && driverId.trim().length > 0 ? driverId : null;
+    setActionMenuMessage(
+      id ? 'Block is not connected yet.' : 'Unable to complete action because this user is missing an ID.',
+    );
+    scheduleMenuClose();
+  };
+
   const handleRequestRide = async () => {
     if (!selectedSlot || !user || !driverId) return;
     if (!pickup || !dropoff) {
-      Alert.alert('Missing info', 'Please select both a pickup and drop-off location.');
       return;
     }
 
@@ -261,9 +292,7 @@ export default function DriverDetailsScreen() {
       setPickup(null);
       setDropoff(null);
       setSelectedSlot(null);
-      Alert.alert('Request sent!', `Your ride request for ${selectedSlot.day} at ${selectedSlot.time} has been sent to ${driverName}.`);
     } catch (e: any) {
-      Alert.alert('Error', e.message ?? 'Could not send ride request. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -271,7 +300,6 @@ export default function DriverDetailsScreen() {
 
   const handleMessage = async () => {
     if (!user) {
-      Alert.alert('Sign in required', 'You must be signed in to send messages.');
       return;
     }
     try {
@@ -281,7 +309,6 @@ export default function DriverDetailsScreen() {
         params: { id: conversationId, otherUserId: driverId, pending: isPending ? 'true' : 'false' },
       });
     } catch {
-      Alert.alert('Error', 'Could not open conversation. Please try again.');
     }
   };
 
@@ -292,7 +319,50 @@ export default function DriverDetailsScreen() {
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Driver Profile</Text>
-        <View style={styles.placeholder} />
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.cardMenuButton}
+            onPress={() => {
+              setActionMenuMessage('');
+              setActionMenuOpen(prev => !prev);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile actions"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="ellipsis-vertical" size={18} color="#666" />
+          </TouchableOpacity>
+
+          {actionMenuOpen ? (
+            <View style={styles.cardActionMenu}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.cardActionMenuItem,
+                  pressed && styles.cardActionMenuItemPressed,
+                ]}
+                onPress={handleFavorite}
+              >
+                <Text style={styles.cardActionMenuText}>Favorite</Text>
+              </Pressable>
+              <View style={styles.cardActionMenuDivider} />
+              <Pressable
+                style={({ pressed }) => [
+                  styles.cardActionMenuItem,
+                  pressed && styles.cardActionMenuItemPressed,
+                ]}
+                onPress={handleBlock}
+              >
+                <Text style={styles.cardActionMenuText}>Block</Text>
+              </Pressable>
+              {actionMenuMessage ? (
+                <>
+                  <View style={styles.cardActionMenuDivider} />
+                  <Text style={styles.cardActionMenuMessage}>{actionMenuMessage}</Text>
+                </>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
       </View>
 
       <ScrollView>
@@ -590,6 +660,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    position: 'relative',
+    zIndex: 50,
+    elevation: 10,
   },
   backButton: {
     width: 40,
@@ -604,6 +677,61 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     width: 40,
+  },
+  headerRight: {
+    width: 40,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    position: 'relative',
+    zIndex: 60,
+    elevation: 12,
+  },
+  cardMenuButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  cardActionMenu: {
+    position: 'absolute',
+    top: 34,
+    right: 0,
+    width: 160,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#eaeaea',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 24,
+    zIndex: 999,
+  },
+  cardActionMenuItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  cardActionMenuItemPressed: {
+    backgroundColor: '#f5f5f5',
+  },
+  cardActionMenuText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  cardActionMenuDivider: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
+  },
+  cardActionMenuMessage: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 16,
   },
   profileSection: {
     backgroundColor: '#fff',

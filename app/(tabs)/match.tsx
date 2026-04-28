@@ -8,8 +8,8 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
+  Pressable,
   Modal,
   ScrollView,
   StyleSheet,
@@ -36,6 +36,10 @@ export default function MatchScreen() {
   const [hasLocation, setHasLocation] = useState(false);
   const locationRef = useRef<{ lat: number; lng: number } | null>(null);
 
+  const [openMenuForUserId, setOpenMenuForUserId] = useState<string | null>(null);
+  const [actionMenuMessage, setActionMenuMessage] = useState('');
+  const closeMenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     init();
   }, []);
@@ -55,7 +59,6 @@ export default function MatchScreen() {
       profile = await getUser(user.uid);
       setCurrentUserProfile(profile);
     } catch {
-      Alert.alert('Error', 'Could not load your profile.');
       setLoading(false);
       return;
     }
@@ -96,8 +99,7 @@ export default function MatchScreen() {
         maxDistance,
       );
       setResults(matched);
-    } catch (e) {
-      console.error('Error loading matches:', e);
+    } catch {
     } finally {
       setLoading(false);
     }
@@ -145,8 +147,42 @@ export default function MatchScreen() {
     });
   };
 
-  const renderMatch = ({ item }: { item: MatchResult }) => (
-    <View style={styles.matchCard}>
+  const getActionUserId = (match: MatchResult): string | null => {
+    const anyUser = match.user as any;
+    const id = (match.user as any)?.uid ?? anyUser?.id;
+    return typeof id === 'string' && id.trim().length > 0 ? id : null;
+  };
+
+  const scheduleMenuClose = () => {
+    if (closeMenuTimerRef.current) clearTimeout(closeMenuTimerRef.current);
+    closeMenuTimerRef.current = setTimeout(() => {
+      setOpenMenuForUserId(null);
+      setActionMenuMessage('');
+    }, 1500);
+  };
+
+  const handleFavorite = (match: MatchResult) => {
+    const id = getActionUserId(match);
+    setActionMenuMessage(
+      id ? 'Favorite is not connected yet.' : 'Unable to complete action because this user is missing an ID.',
+    );
+    scheduleMenuClose();
+  };
+
+  const handleBlock = (match: MatchResult) => {
+    const id = getActionUserId(match);
+    setActionMenuMessage(
+      id ? 'Block is not connected yet.' : 'Unable to complete action because this user is missing an ID.',
+    );
+    scheduleMenuClose();
+  };
+
+  const renderMatch = ({ item, index }: { item: MatchResult; index: number }) => {
+    const userId = getActionUserId(item);
+    const menuKey = userId ?? `missing-id-${index}`;
+    const menuOpen = openMenuForUserId === menuKey;
+    return (
+    <View style={[styles.matchCard, menuOpen && styles.matchCardMenuOpen]}>
       <View style={styles.matchHeader}>
         <View style={styles.avatar}>
           <Ionicons name="person" size={32} color="#999" />
@@ -168,9 +204,58 @@ export default function MatchScreen() {
             <Text style={styles.detailText}>{item.scheduleOverlapPercent}% schedule match</Text>
           </View>
         </View>
-        <View style={styles.scoreContainer}>
-          <Text style={styles.scoreValue}>{Math.round(item.score * 100)}%</Text>
-          <Text style={styles.scoreLabel}>match</Text>
+        <View style={styles.rightHeaderColumn}>
+          <TouchableOpacity
+            style={styles.cardMenuButton}
+            onPress={() => {
+              setActionMenuMessage('');
+              setOpenMenuForUserId(prev => (prev === menuKey ? null : menuKey));
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile actions"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="ellipsis-vertical" size={18} color="#666" />
+          </TouchableOpacity>
+
+          {menuOpen ? (
+            <View style={styles.cardActionMenu}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.cardActionMenuItem,
+                  pressed && styles.cardActionMenuItemPressed,
+                ]}
+                onPress={() => {
+                  handleFavorite(item);
+                }}
+              >
+                <Text style={styles.cardActionMenuText}>Favorite</Text>
+              </Pressable>
+              <View style={styles.cardActionMenuDivider} />
+              <Pressable
+                style={({ pressed }) => [
+                  styles.cardActionMenuItem,
+                  pressed && styles.cardActionMenuItemPressed,
+                ]}
+                onPress={() => {
+                  handleBlock(item);
+                }}
+              >
+                <Text style={styles.cardActionMenuText}>Block</Text>
+              </Pressable>
+              {actionMenuMessage ? (
+                <>
+                  <View style={styles.cardActionMenuDivider} />
+                  <Text style={styles.cardActionMenuMessage}>{actionMenuMessage}</Text>
+                </>
+              ) : null}
+            </View>
+          ) : null}
+
+          <View style={styles.scoreContainer}>
+            <Text style={styles.scoreValue}>{Math.round(item.score * 100)}%</Text>
+            <Text style={styles.scoreLabel}>match</Text>
+          </View>
         </View>
       </View>
 
@@ -185,7 +270,8 @@ export default function MatchScreen() {
         </TouchableOpacity>
       </View>
     </View>
-  );
+    );
+  };
 
   const roleLookingFor = currentUserProfile?.activeRole === 'driver' ? 'Riders' : 'Drivers';
   const filtersActive = selectedRating !== null || maxDistance !== 25;
@@ -249,7 +335,13 @@ export default function MatchScreen() {
         <FlatList
           data={filteredResults}
           renderItem={renderMatch}
-          keyExtractor={item => item.user.uid}
+          keyExtractor={(item, index) =>
+            (item.user as any)?.uid ?? (item.user as any)?.id ?? String(index)
+          }
+          onScrollBeginDrag={() => {
+            setOpenMenuForUserId(null);
+            setActionMenuMessage('');
+          }}
           contentContainerStyle={styles.listContent}
         />
       )}
@@ -413,6 +505,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 2,
+    position: 'relative',
+    overflow: 'visible',
+  },
+  matchCardMenuOpen: {
+    zIndex: 50,
+    elevation: 12,
   },
   matchHeader: {
     flexDirection: 'row',
@@ -474,6 +572,61 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     marginLeft: 8,
+  },
+  rightHeaderColumn: {
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    marginLeft: 8,
+    position: 'relative',
+    zIndex: 60,
+    elevation: 12,
+  },
+  cardMenuButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  cardActionMenu: {
+    position: 'relative',
+    alignSelf: 'flex-end',
+    marginTop: 8,
+    width: 150,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#eaeaea',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 24,
+    zIndex: 999,
+  },
+  cardActionMenuItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  cardActionMenuItemPressed: {
+    backgroundColor: '#f5f5f5',
+  },
+  cardActionMenuText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  cardActionMenuMessage: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 16,
+  },
+  cardActionMenuDivider: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
   },
   scoreValue: {
     fontSize: 16,
