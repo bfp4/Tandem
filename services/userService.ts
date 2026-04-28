@@ -121,6 +121,11 @@ export async function removeFavorite(currentUid: string, targetUid: string): Pro
   await deleteDoc(doc(db, 'users', currentUid, 'favorites', targetUid));
 }
 
+export async function isFavorited(currentUid: string, targetUid: string): Promise<boolean> {
+  const snap = await getDoc(doc(db, 'users', currentUid, 'favorites', targetUid));
+  return snap.exists();
+}
+
 export async function getBlockedAccounts(currentUid: string): Promise<SavedAccountRef[]> {
   const snap = await getDocs(collection(db, 'users', currentUid, 'blockedAccounts'));
   const rows = snap.docs.map((d) => d.data() as Partial<SavedAccountRef>);
@@ -146,6 +151,11 @@ export async function getBlockedAccountIds(currentUid: string): Promise<string[]
 
 export async function removeBlockedAccount(currentUid: string, targetUid: string): Promise<void> {
   await deleteDoc(doc(db, 'users', currentUid, 'blockedAccounts', targetUid));
+}
+
+export async function isBlockedAccount(currentUid: string, targetUid: string): Promise<boolean> {
+  const snap = await getDoc(doc(db, 'users', currentUid, 'blockedAccounts', targetUid));
+  return snap.exists();
 }
 
 export async function updateUser(

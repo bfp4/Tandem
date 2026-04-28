@@ -2,7 +2,14 @@ import { useAuth } from '@/context/AuthContext';
 import { getOrCreateConversation } from '@/services/messagingService';
 import { createNotification } from '@/services/notificationService';
 import { createRideRequest } from '@/services/rideRequestService';
-import { addBlockedAccount, addFavorite } from '@/services/userService';
+import {
+  addBlockedAccount,
+  addFavorite,
+  isBlockedAccount,
+  isFavorited,
+  removeBlockedAccount,
+  removeFavorite,
+} from '@/services/userService';
 import { calculateDriveTime, formatDriveTime } from '@/utils/driveTime';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -110,6 +117,12 @@ export default function DriverDetailsScreen() {
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [actionMenuMessage, setActionMenuMessage] = useState('');
   const closeMenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [menuStatus, setMenuStatus] = useState<{ favorited: boolean; blocked: boolean; loading: boolean }>({
+    favorited: false,
+    blocked: false,
+    loading: false,
+  });
+  const [confirmBlock, setConfirmBlock] = useState(false);
 
   // Address lookup modal state
   const [addressModalVisible, setAddressModalVisible] = useState(false);
@@ -234,7 +247,22 @@ export default function DriverDetailsScreen() {
     closeMenuTimerRef.current = setTimeout(() => {
       setActionMenuOpen(false);
       setActionMenuMessage('');
+      setConfirmBlock(false);
     }, delayMs);
+  };
+
+  const loadMenuStatus = async (targetUid: string) => {
+    if (!user?.uid) return;
+    setMenuStatus((s) => ({ ...s, loading: true }));
+    try {
+      const [fav, blocked] = await Promise.all([
+        isFavorited(user.uid, targetUid),
+        isBlockedAccount(user.uid, targetUid),
+      ]);
+      setMenuStatus({ favorited: fav, blocked, loading: false });
+    } catch {
+      setMenuStatus((s) => ({ ...s, loading: false }));
+    }
   };
 
   const handleFavorite = async () => {
@@ -253,22 +281,29 @@ export default function DriverDetailsScreen() {
     }
 
     try {
-      await addFavorite(currentUid, {
-        uid: targetUid,
-        name: driverName,
-        activeRole: 'driver' as any,
-      });
-      setActionMenuMessage('Added to favorites');
+      if (menuStatus.favorited) {
+        await removeFavorite(currentUid, targetUid);
+        setMenuStatus((s) => ({ ...s, favorited: false }));
+        setActionMenuMessage('Removed from favorites');
+      } else {
+        await addFavorite(currentUid, {
+          uid: targetUid,
+          name: driverName,
+          activeRole: 'driver' as any,
+        });
+        setMenuStatus((s) => ({ ...s, favorited: true }));
+        setActionMenuMessage('Added to favorites');
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      setActionMenuMessage(`Failed to add favorite: ${message}`);
+      setActionMenuMessage(`Failed to update favorite: ${message}`);
       scheduleMenuClose(3000);
       return;
     }
     scheduleMenuClose();
   };
 
-  const handleBlock = async () => {
+  const handleConfirmBlock = async () => {
     const targetUid = typeof driverId === 'string' && driverId.trim().length > 0 ? driverId : null;
     if (!targetUid) {
       setActionMenuMessage('Unable to complete action because this user is missing an ID.');
@@ -289,6 +324,7 @@ export default function DriverDetailsScreen() {
         name: driverName,
         activeRole: 'driver' as any,
       });
+      setMenuStatus((s) => ({ ...s, blocked: true }));
       setActionMenuMessage('Blocked account');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -297,6 +333,40 @@ export default function DriverDetailsScreen() {
       return;
     }
     scheduleMenuClose();
+  };
+
+  const handleBlockToggle = async () => {
+    const targetUid = typeof driverId === 'string' && driverId.trim().length > 0 ? driverId : null;
+    if (!targetUid) {
+      setActionMenuMessage('Unable to complete action because this user is missing an ID.');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    const currentUid = user?.uid;
+    if (!currentUid) {
+      setActionMenuMessage('Failed to block account: Missing current user ID');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    if (menuStatus.blocked) {
+      try {
+        await removeBlockedAccount(currentUid, targetUid);
+        setMenuStatus((s) => ({ ...s, blocked: false }));
+        setActionMenuMessage('Unblocked account');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        setActionMenuMessage(`Failed to unblock account: ${message}`);
+        scheduleMenuClose(3000);
+        return;
+      }
+      scheduleMenuClose();
+      return;
+    }
+
+    setConfirmBlock(true);
+    setActionMenuMessage('Block this user?');
   };
 
   const handleRequestRide = async () => {
@@ -371,7 +441,16 @@ export default function DriverDetailsScreen() {
             style={styles.cardMenuButton}
             onPress={() => {
               setActionMenuMessage('');
-              setActionMenuOpen(prev => !prev);
+              setConfirmBlock(false);
+              setActionMenuOpen(prev => {
+                const next = !prev;
+                if (next) {
+                  const targetUid =
+                    typeof driverId === 'string' && driverId.trim().length > 0 ? driverId : null;
+                  if (targetUid) void loadMenuStatus(targetUid);
+                }
+                return next;
+              });
             }}
             accessibilityRole="button"
             accessibilityLabel="Open profile actions"
@@ -382,25 +461,64 @@ export default function DriverDetailsScreen() {
 
           {actionMenuOpen ? (
             <View style={styles.cardActionMenu}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.cardActionMenuItem,
-                  pressed && styles.cardActionMenuItemPressed,
-                ]}
-                onPress={() => void handleFavorite()}
-              >
-                <Text style={styles.cardActionMenuText}>Favorite</Text>
-              </Pressable>
-              <View style={styles.cardActionMenuDivider} />
-              <Pressable
-                style={({ pressed }) => [
-                  styles.cardActionMenuItem,
-                  pressed && styles.cardActionMenuItemPressed,
-                ]}
-                onPress={() => void handleBlock()}
-              >
-                <Text style={styles.cardActionMenuText}>Block</Text>
-              </Pressable>
+              {!confirmBlock ? (
+                <>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.cardActionMenuItem,
+                      pressed && styles.cardActionMenuItemPressed,
+                    ]}
+                    onPress={() => void handleFavorite()}
+                  >
+                    <Text style={styles.cardActionMenuText}>
+                      {menuStatus.favorited ? 'Remove Favorite' : 'Favorite'}
+                    </Text>
+                  </Pressable>
+                  <View style={styles.cardActionMenuDivider} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.cardActionMenuItem,
+                      pressed && styles.cardActionMenuItemPressed,
+                    ]}
+                    onPress={() => void handleBlockToggle()}
+                  >
+                    <Text style={styles.cardActionMenuText}>
+                      {menuStatus.blocked ? 'Unblock' : 'Block'}
+                    </Text>
+                  </Pressable>
+                </>
+              ) : (
+                <View style={styles.cardActionMenuConfirm}>
+                  <Text style={styles.cardActionMenuMessage}>Block this user?</Text>
+                  <View style={styles.cardActionMenuConfirmRow}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.cardActionMenuConfirmButton,
+                        pressed && styles.cardActionMenuItemPressed,
+                      ]}
+                      onPress={() => {
+                        setConfirmBlock(false);
+                        setActionMenuMessage('');
+                      }}
+                    >
+                      <Text style={styles.cardActionMenuConfirmText}>Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.cardActionMenuConfirmButton,
+                        styles.cardActionMenuConfirmDangerButton,
+                        pressed && styles.cardActionMenuItemPressed,
+                      ]}
+                      onPress={() => {
+                        setConfirmBlock(false);
+                        void handleConfirmBlock();
+                      }}
+                    >
+                      <Text style={styles.cardActionMenuConfirmText}>Confirm Block</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
               {actionMenuMessage ? (
                 <>
                   <View style={styles.cardActionMenuDivider} />
@@ -779,6 +897,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     lineHeight: 16,
+  },
+  cardActionMenuConfirm: {
+    paddingTop: 6,
+    paddingBottom: 2,
+  },
+  cardActionMenuConfirmRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+  },
+  cardActionMenuConfirmButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    alignItems: 'center',
+  },
+  cardActionMenuConfirmDangerButton: {
+    borderColor: '#FF3B30',
+  },
+  cardActionMenuConfirmText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#333',
   },
   profileSection: {
     backgroundColor: '#fff',

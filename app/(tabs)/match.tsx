@@ -4,7 +4,11 @@ import {
   addBlockedAccount,
   addFavorite,
   getBlockedAccountIds,
+  isBlockedAccount,
+  isFavorited,
   getUser,
+  removeBlockedAccount,
+  removeFavorite,
 } from '@/services/userService';
 import type { User } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
@@ -45,6 +49,12 @@ export default function MatchScreen() {
   const [openMenuForUserId, setOpenMenuForUserId] = useState<string | null>(null);
   const [actionMenuMessage, setActionMenuMessage] = useState('');
   const closeMenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [menuStatus, setMenuStatus] = useState<{ favorited: boolean; blocked: boolean; loading: boolean }>({
+    favorited: false,
+    blocked: false,
+    loading: false,
+  });
+  const [confirmBlockForMenuKey, setConfirmBlockForMenuKey] = useState<string | null>(null);
 
   useEffect(() => {
     init();
@@ -183,7 +193,22 @@ export default function MatchScreen() {
     closeMenuTimerRef.current = setTimeout(() => {
       setOpenMenuForUserId(null);
       setActionMenuMessage('');
+      setConfirmBlockForMenuKey(null);
     }, delayMs);
+  };
+
+  const loadMenuStatus = async (targetUid: string) => {
+    if (!user?.uid) return;
+    setMenuStatus((s) => ({ ...s, loading: true }));
+    try {
+      const [fav, blocked] = await Promise.all([
+        isFavorited(user.uid, targetUid),
+        isBlockedAccount(user.uid, targetUid),
+      ]);
+      setMenuStatus({ favorited: fav, blocked, loading: false });
+    } catch {
+      setMenuStatus((s) => ({ ...s, loading: false }));
+    }
   };
 
   const handleFavorite = async (match: MatchResult) => {
@@ -202,22 +227,29 @@ export default function MatchScreen() {
     }
 
     try {
-      await addFavorite(currentUid, {
-        uid: targetUid,
-        name: match.user.name,
-        activeRole: (match.user as any).activeRole ?? null,
-      });
-      setActionMenuMessage('Added to favorites');
+      if (menuStatus.favorited) {
+        await removeFavorite(currentUid, targetUid);
+        setMenuStatus((s) => ({ ...s, favorited: false }));
+        setActionMenuMessage('Removed from favorites');
+      } else {
+        await addFavorite(currentUid, {
+          uid: targetUid,
+          name: match.user.name,
+          activeRole: (match.user as any).activeRole ?? null,
+        });
+        setMenuStatus((s) => ({ ...s, favorited: true }));
+        setActionMenuMessage('Added to favorites');
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      setActionMenuMessage(`Failed to add favorite: ${message}`);
+      setActionMenuMessage(`Failed to update favorite: ${message}`);
       scheduleMenuClose(3000);
       return;
     }
     scheduleMenuClose();
   };
 
-  const handleBlock = async (match: MatchResult) => {
+  const handleConfirmBlock = async (match: MatchResult) => {
     const targetUid = getActionUserId(match);
     if (!targetUid) {
       setActionMenuMessage('Unable to complete action because this user is missing an ID.');
@@ -238,6 +270,7 @@ export default function MatchScreen() {
         name: match.user.name,
         activeRole: (match.user as any).activeRole ?? null,
       });
+      setMenuStatus((s) => ({ ...s, blocked: true }));
       setActionMenuMessage('Blocked account');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -248,10 +281,45 @@ export default function MatchScreen() {
     scheduleMenuClose();
   };
 
+  const handleBlockToggle = async (match: MatchResult, menuKey: string) => {
+    const targetUid = getActionUserId(match);
+    if (!targetUid) {
+      setActionMenuMessage('Unable to complete action because this user is missing an ID.');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    const currentUid = user?.uid;
+    if (!currentUid) {
+      setActionMenuMessage('Failed to block account: Missing current user ID');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    if (menuStatus.blocked) {
+      try {
+        await removeBlockedAccount(currentUid, targetUid);
+        setMenuStatus((s) => ({ ...s, blocked: false }));
+        setActionMenuMessage('Unblocked account');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        setActionMenuMessage(`Failed to unblock account: ${message}`);
+        scheduleMenuClose(3000);
+        return;
+      }
+      scheduleMenuClose();
+      return;
+    }
+
+    setConfirmBlockForMenuKey(menuKey);
+    setActionMenuMessage('Block this user?');
+  };
+
   const renderMatch = ({ item, index }: { item: MatchResult; index: number }) => {
     const userId = getActionUserId(item);
     const menuKey = userId ?? `missing-id-${index}`;
     const menuOpen = openMenuForUserId === menuKey;
+    const confirmBlockOpen = confirmBlockForMenuKey === menuKey;
     return (
     <View style={[styles.matchCard, menuOpen && styles.matchCardMenuOpen]}>
       <View style={styles.matchHeader}>
@@ -280,7 +348,12 @@ export default function MatchScreen() {
             style={styles.cardMenuButton}
             onPress={() => {
               setActionMenuMessage('');
-              setOpenMenuForUserId(prev => (prev === menuKey ? null : menuKey));
+              setConfirmBlockForMenuKey(null);
+              setOpenMenuForUserId(prev => {
+                const next = prev === menuKey ? null : menuKey;
+                if (next === menuKey && userId) void loadMenuStatus(userId);
+                return next;
+              });
             }}
             accessibilityRole="button"
             accessibilityLabel="Open profile actions"
@@ -291,29 +364,68 @@ export default function MatchScreen() {
 
           {menuOpen ? (
             <View style={styles.cardActionMenu}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.cardActionMenuItem,
-                  pressed && styles.cardActionMenuItemPressed,
-                ]}
-                onPress={() => {
-                  void handleFavorite(item);
-                }}
-              >
-                <Text style={styles.cardActionMenuText}>Favorite</Text>
-              </Pressable>
-              <View style={styles.cardActionMenuDivider} />
-              <Pressable
-                style={({ pressed }) => [
-                  styles.cardActionMenuItem,
-                  pressed && styles.cardActionMenuItemPressed,
-                ]}
-                onPress={() => {
-                  void handleBlock(item);
-                }}
-              >
-                <Text style={styles.cardActionMenuText}>Block</Text>
-              </Pressable>
+              {!confirmBlockOpen ? (
+                <>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.cardActionMenuItem,
+                      pressed && styles.cardActionMenuItemPressed,
+                    ]}
+                    onPress={() => {
+                      void handleFavorite(item);
+                    }}
+                  >
+                    <Text style={styles.cardActionMenuText}>
+                      {menuStatus.favorited ? 'Remove Favorite' : 'Favorite'}
+                    </Text>
+                  </Pressable>
+                  <View style={styles.cardActionMenuDivider} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.cardActionMenuItem,
+                      pressed && styles.cardActionMenuItemPressed,
+                    ]}
+                    onPress={() => {
+                      void handleBlockToggle(item, menuKey);
+                    }}
+                  >
+                    <Text style={styles.cardActionMenuText}>
+                      {menuStatus.blocked ? 'Unblock' : 'Block'}
+                    </Text>
+                  </Pressable>
+                </>
+              ) : (
+                <View style={styles.cardActionMenuConfirm}>
+                  <Text style={styles.cardActionMenuMessage}>Block this user?</Text>
+                  <View style={styles.cardActionMenuConfirmRow}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.cardActionMenuConfirmButton,
+                        pressed && styles.cardActionMenuItemPressed,
+                      ]}
+                      onPress={() => {
+                        setConfirmBlockForMenuKey(null);
+                        setActionMenuMessage('');
+                      }}
+                    >
+                      <Text style={styles.cardActionMenuConfirmText}>Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.cardActionMenuConfirmButton,
+                        styles.cardActionMenuConfirmDangerButton,
+                        pressed && styles.cardActionMenuItemPressed,
+                      ]}
+                      onPress={() => {
+                        setConfirmBlockForMenuKey(null);
+                        void handleConfirmBlock(item);
+                      }}
+                    >
+                      <Text style={styles.cardActionMenuConfirmText}>Confirm Block</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
               {actionMenuMessage ? (
                 <>
                   <View style={styles.cardActionMenuDivider} />
@@ -705,6 +817,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     lineHeight: 16,
+  },
+  cardActionMenuConfirm: {
+    paddingTop: 6,
+    paddingBottom: 2,
+  },
+  cardActionMenuConfirmRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+  },
+  cardActionMenuConfirmButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    alignItems: 'center',
+  },
+  cardActionMenuConfirmDangerButton: {
+    borderColor: '#FF3B30',
+  },
+  cardActionMenuConfirmText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#333',
   },
   cardActionMenuDivider: {
     height: 1,
