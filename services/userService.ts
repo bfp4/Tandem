@@ -7,6 +7,8 @@ import {
     getDoc,
     getDocs,
     query,
+    serverTimestamp,
+    setDoc,
     updateDoc,
     where,
 } from 'firebase/firestore';
@@ -30,6 +32,69 @@ export async function getUser(userId: string): Promise<User> {
   const snap = await getDoc(doc(db, 'users', userId));
   if (!snap.exists()) throw new Error(`User not found: ${userId}`);
   return { ...snap.data(), uid: snap.id } as User;
+}
+
+export type FavoriteTargetUser = Pick<User, 'name' | 'activeRole'> & {
+  uid?: string;
+  id?: string;
+};
+
+export async function addFavorite(
+  currentUid: string,
+  targetUser: FavoriteTargetUser,
+): Promise<void> {
+  const targetUid = targetUser.uid ?? targetUser.id;
+  if (!targetUid) throw new Error('Missing targetUid');
+
+  try {
+    await setDoc(
+      doc(db, 'users', currentUid, 'favorites', targetUid),
+      {
+        targetUid,
+        name: targetUser.name,
+        activeRole: targetUser.activeRole ?? null,
+        createdAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    const anyErr = error as any;
+    const code = typeof anyErr?.code === 'string' ? anyErr.code : undefined;
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    const projectId = (db as any)?.app?.options?.projectId;
+
+    const suffix = `${code ? ` (${code})` : ''}${projectId ? ` [projectId:${projectId}]` : ''}`;
+    throw new Error(`${message}${suffix}`);
+  }
+}
+
+export async function addBlockedAccount(
+  currentUid: string,
+  targetUser: FavoriteTargetUser,
+): Promise<void> {
+  const targetUid = targetUser.uid ?? targetUser.id;
+  if (!targetUid) throw new Error('Missing targetUid');
+
+  try {
+    await setDoc(
+      doc(db, 'users', currentUid, 'blockedAccounts', targetUid),
+      {
+        targetUid,
+        name: targetUser.name,
+        activeRole: targetUser.activeRole ?? null,
+        createdAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    const anyErr = error as any;
+    const code = typeof anyErr?.code === 'string' ? anyErr.code : undefined;
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    const projectId = (db as any)?.app?.options?.projectId;
+
+    const suffix = `${code ? ` (${code})` : ''}${projectId ? ` [projectId:${projectId}]` : ''}`;
+    throw new Error(`${message}${suffix}`);
+  }
 }
 
 export async function updateUser(

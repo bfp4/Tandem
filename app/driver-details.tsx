@@ -2,6 +2,7 @@ import { useAuth } from '@/context/AuthContext';
 import { getOrCreateConversation } from '@/services/messagingService';
 import { createNotification } from '@/services/notificationService';
 import { createRideRequest } from '@/services/rideRequestService';
+import { addBlockedAccount, addFavorite } from '@/services/userService';
 import { calculateDriveTime, formatDriveTime } from '@/utils/driveTime';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -228,27 +229,73 @@ export default function DriverDetailsScreen() {
     setSideBoxVisible(true);
   };
 
-  const scheduleMenuClose = () => {
+  const scheduleMenuClose = (delayMs: number = 1500) => {
     if (closeMenuTimerRef.current) clearTimeout(closeMenuTimerRef.current);
     closeMenuTimerRef.current = setTimeout(() => {
       setActionMenuOpen(false);
       setActionMenuMessage('');
-    }, 1500);
+    }, delayMs);
   };
 
-  const handleFavorite = () => {
-    const id = typeof driverId === 'string' && driverId.trim().length > 0 ? driverId : null;
-    setActionMenuMessage(
-      id ? 'Favorite is not connected yet.' : 'Unable to complete action because this user is missing an ID.',
-    );
+  const handleFavorite = async () => {
+    const targetUid = typeof driverId === 'string' && driverId.trim().length > 0 ? driverId : null;
+    if (!targetUid) {
+      setActionMenuMessage('Unable to complete action because this user is missing an ID.');
+      scheduleMenuClose();
+      return;
+    }
+
+    const currentUid = user?.uid;
+    if (!currentUid) {
+      setActionMenuMessage('Failed to add favorite: Missing current user ID');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    try {
+      await addFavorite(currentUid, {
+        uid: targetUid,
+        name: driverName,
+        activeRole: 'driver' as any,
+      });
+      setActionMenuMessage('Added to favorites');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setActionMenuMessage(`Failed to add favorite: ${message}`);
+      scheduleMenuClose(3000);
+      return;
+    }
     scheduleMenuClose();
   };
 
-  const handleBlock = () => {
-    const id = typeof driverId === 'string' && driverId.trim().length > 0 ? driverId : null;
-    setActionMenuMessage(
-      id ? 'Block is not connected yet.' : 'Unable to complete action because this user is missing an ID.',
-    );
+  const handleBlock = async () => {
+    const targetUid = typeof driverId === 'string' && driverId.trim().length > 0 ? driverId : null;
+    if (!targetUid) {
+      setActionMenuMessage('Unable to complete action because this user is missing an ID.');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    const currentUid = user?.uid;
+    if (!currentUid) {
+      setActionMenuMessage('Failed to block account: Missing current user ID');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    try {
+      await addBlockedAccount(currentUid, {
+        uid: targetUid,
+        name: driverName,
+        activeRole: 'driver' as any,
+      });
+      setActionMenuMessage('Blocked account');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setActionMenuMessage(`Failed to block account: ${message}`);
+      scheduleMenuClose(3000);
+      return;
+    }
     scheduleMenuClose();
   };
 
@@ -340,7 +387,7 @@ export default function DriverDetailsScreen() {
                   styles.cardActionMenuItem,
                   pressed && styles.cardActionMenuItemPressed,
                 ]}
-                onPress={handleFavorite}
+                onPress={() => void handleFavorite()}
               >
                 <Text style={styles.cardActionMenuText}>Favorite</Text>
               </Pressable>
@@ -350,7 +397,7 @@ export default function DriverDetailsScreen() {
                   styles.cardActionMenuItem,
                   pressed && styles.cardActionMenuItemPressed,
                 ]}
-                onPress={handleBlock}
+                onPress={() => void handleBlock()}
               >
                 <Text style={styles.cardActionMenuText}>Block</Text>
               </Pressable>

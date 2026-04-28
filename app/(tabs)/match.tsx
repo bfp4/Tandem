@@ -1,6 +1,6 @@
 import { useAuth } from '@/context/AuthContext';
 import { getMatchedUsers, type MatchResult } from '@/services/matchingService';
-import { getUser } from '@/services/userService';
+import { addBlockedAccount, addFavorite, getUser } from '@/services/userService';
 import type { User } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -9,8 +9,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Pressable,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -153,27 +153,73 @@ export default function MatchScreen() {
     return typeof id === 'string' && id.trim().length > 0 ? id : null;
   };
 
-  const scheduleMenuClose = () => {
+  const scheduleMenuClose = (delayMs: number = 1500) => {
     if (closeMenuTimerRef.current) clearTimeout(closeMenuTimerRef.current);
     closeMenuTimerRef.current = setTimeout(() => {
       setOpenMenuForUserId(null);
       setActionMenuMessage('');
-    }, 1500);
+    }, delayMs);
   };
 
-  const handleFavorite = (match: MatchResult) => {
-    const id = getActionUserId(match);
-    setActionMenuMessage(
-      id ? 'Favorite is not connected yet.' : 'Unable to complete action because this user is missing an ID.',
-    );
+  const handleFavorite = async (match: MatchResult) => {
+    const targetUid = getActionUserId(match);
+    if (!targetUid) {
+      setActionMenuMessage('Unable to complete action because this user is missing an ID.');
+      scheduleMenuClose();
+      return;
+    }
+
+    const currentUid = user?.uid;
+    if (!currentUid) {
+      setActionMenuMessage('Failed to add favorite: Missing current user ID');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    try {
+      await addFavorite(currentUid, {
+        uid: targetUid,
+        name: match.user.name,
+        activeRole: (match.user as any).activeRole ?? null,
+      });
+      setActionMenuMessage('Added to favorites');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setActionMenuMessage(`Failed to add favorite: ${message}`);
+      scheduleMenuClose(3000);
+      return;
+    }
     scheduleMenuClose();
   };
 
-  const handleBlock = (match: MatchResult) => {
-    const id = getActionUserId(match);
-    setActionMenuMessage(
-      id ? 'Block is not connected yet.' : 'Unable to complete action because this user is missing an ID.',
-    );
+  const handleBlock = async (match: MatchResult) => {
+    const targetUid = getActionUserId(match);
+    if (!targetUid) {
+      setActionMenuMessage('Unable to complete action because this user is missing an ID.');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    const currentUid = user?.uid;
+    if (!currentUid) {
+      setActionMenuMessage('Failed to block account: Missing current user ID');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    try {
+      await addBlockedAccount(currentUid, {
+        uid: targetUid,
+        name: match.user.name,
+        activeRole: (match.user as any).activeRole ?? null,
+      });
+      setActionMenuMessage('Blocked account');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setActionMenuMessage(`Failed to block account: ${message}`);
+      scheduleMenuClose(3000);
+      return;
+    }
     scheduleMenuClose();
   };
 
@@ -226,7 +272,7 @@ export default function MatchScreen() {
                   pressed && styles.cardActionMenuItemPressed,
                 ]}
                 onPress={() => {
-                  handleFavorite(item);
+                  void handleFavorite(item);
                 }}
               >
                 <Text style={styles.cardActionMenuText}>Favorite</Text>
@@ -238,7 +284,7 @@ export default function MatchScreen() {
                   pressed && styles.cardActionMenuItemPressed,
                 ]}
                 onPress={() => {
-                  handleBlock(item);
+                  void handleBlock(item);
                 }}
               >
                 <Text style={styles.cardActionMenuText}>Block</Text>
