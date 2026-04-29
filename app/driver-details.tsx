@@ -5,6 +5,7 @@ import { createRideRequest } from '@/services/rideRequestService';
 import {
   addBlockedAccount,
   addFavorite,
+  hasEitherUserBlocked,
   isBlockedAccount,
   isFavorited,
   removeBlockedAccount,
@@ -123,6 +124,9 @@ export default function DriverDetailsScreen() {
     loading: false,
   });
   const [confirmBlock, setConfirmBlock] = useState(false);
+  const [isProfileBlocked, setIsProfileBlocked] = useState(false);
+  const [blockedStatusLoaded, setBlockedStatusLoaded] = useState(false);
+  const [blockedByOther, setBlockedByOther] = useState(false);
 
   // Address lookup modal state
   const [addressModalVisible, setAddressModalVisible] = useState(false);
@@ -177,6 +181,33 @@ export default function DriverDetailsScreen() {
   useEffect(() => {
     loadSchedules();
   }, [driverId, user]);
+
+  useEffect(() => {
+    const targetUid = typeof driverId === 'string' && driverId.trim().length > 0 ? driverId : null;
+    const currentUid = user?.uid;
+    if (!targetUid || !currentUid) return;
+
+    (async () => {
+      try {
+        const eitherBlocked = await hasEitherUserBlocked(currentUid, targetUid);
+        const otherBlockedMe = await isBlockedAccount(targetUid, currentUid);
+        setBlockedByOther(otherBlockedMe);
+        setIsProfileBlocked(eitherBlocked);
+        // #region agent log
+        fetch('http://127.0.0.1:7298/ingest/97313dd6-65fa-4454-bb22-201405ef2283',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c36d6c'},body:JSON.stringify({sessionId:'c36d6c',runId:'pre-fix',hypothesisId:'H_driver_two_way',location:'app/driver-details.tsx:blockedEffect',message:'loaded two-way block status',data:{eitherBlocked,otherBlockedMe},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion agent log
+      } catch {
+        // ignore — don't block page usage if status can't be fetched
+      } finally {
+        setBlockedStatusLoaded(true);
+      }
+    })();
+  }, [driverId, user?.uid]);
+
+  useEffect(() => {
+    // Keep the page-level protection in sync with menu actions (Block/Unblock)
+    if (blockedStatusLoaded) setIsProfileBlocked(menuStatus.blocked || blockedByOther);
+  }, [menuStatus.blocked, blockedByOther, blockedStatusLoaded]);
 
   useEffect(() => {
     return () => {
@@ -235,6 +266,7 @@ export default function DriverDetailsScreen() {
   };
 
   const handleSlotPress = (slot: TimeSlot) => {
+    if (isProfileBlocked) return;
     if (!slot.available) {
       return;
     }
@@ -538,6 +570,13 @@ export default function DriverDetailsScreen() {
 
           <Text style={styles.driverName}>{driverName}</Text>
 
+          {isProfileBlocked ? (
+            <View style={styles.blockedBanner}>
+              <Ionicons name="ban" size={14} color="#FF3B30" />
+              <Text style={styles.blockedBannerText}>You have blocked this user.</Text>
+            </View>
+          ) : null}
+
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
               <Ionicons name="star" size={18} color="#FFB800" />
@@ -577,7 +616,11 @@ export default function DriverDetailsScreen() {
 
           {bio ? <Text style={styles.bioText}>{bio}</Text> : null}
 
-          <TouchableOpacity style={styles.messageButton} onPress={handleMessage}>
+          <TouchableOpacity
+            style={[styles.messageButton, isProfileBlocked && styles.messageButtonDisabled]}
+            onPress={handleMessage}
+            disabled={isProfileBlocked}
+          >
             <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
             <Text style={styles.messageButtonText}>Message</Text>
           </TouchableOpacity>
@@ -641,7 +684,7 @@ export default function DriverDetailsScreen() {
                 </View>
               </ScrollView>
 
-              {sideBoxVisible && selectedSlot && (
+              {sideBoxVisible && selectedSlot && !isProfileBlocked && (
                 <View style={styles.sideBox}>
                   <View style={styles.sideBoxHeader}>
                     <Text style={styles.sideBoxTitle} numberOfLines={2}>
@@ -992,6 +1035,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 4,
   },
+  blockedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFF5F5',
+    borderWidth: 1,
+    borderColor: '#FFD1D1',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  blockedBannerText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#B42318',
+  },
   messageButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1001,6 +1061,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     marginTop: 16,
     gap: 8,
+  },
+  messageButtonDisabled: {
+    opacity: 0.6,
   },
   messageButtonText: {
     color: '#fff',

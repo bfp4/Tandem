@@ -3,10 +3,10 @@ import { getMatchedUsers, type MatchResult } from '@/services/matchingService';
 import {
   addBlockedAccount,
   addFavorite,
-  getBlockedAccountIds,
+  hasEitherUserBlocked,
+  getUser,
   isBlockedAccount,
   isFavorited,
-  getUser,
   removeBlockedAccount,
   removeFavorite,
 } from '@/services/userService';
@@ -114,24 +114,37 @@ export default function MatchScreen() {
         role,
         maxDistance,
       );
-      let blockedIds: string[] = [];
-      if (user?.uid) {
-        try {
-          blockedIds = await getBlockedAccountIds(user.uid);
-        } catch (error) {
-          setBlockedFilterMessage('Could not load blocked accounts — showing all matches.');
-          setTimeout(() => setBlockedFilterMessage(''), 2500);
-        }
+      if (!user?.uid) {
+        setResults(matched);
+        return;
       }
 
-      if (blockedIds.length > 0) {
-        const blockedSet = new Set(blockedIds);
+      const currentUid = user.uid;
+      const targetIds = Array.from(
+        new Set(
+          matched
+            .map((r) => (r.user as any)?.uid ?? (r.user as any)?.id)
+            .filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
+        ),
+      );
+
+      try {
+        const checks = await Promise.all(
+          targetIds.map(async (targetUid) => ({
+            targetUid,
+            eitherBlocked: await hasEitherUserBlocked(currentUid, targetUid),
+          })),
+        );
+        const blockedSet = new Set(checks.filter((c) => c.eitherBlocked).map((c) => c.targetUid));
         const filtered = matched.filter((r) => {
           const id = (r.user as any)?.uid ?? (r.user as any)?.id;
           return typeof id === 'string' ? !blockedSet.has(id) : true;
         });
         setResults(filtered);
-      } else {
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        setBlockedFilterMessage(`Could not verify blocks — showing all matches. (${message})`);
+        setTimeout(() => setBlockedFilterMessage(''), 3500);
         setResults(matched);
       }
     } catch {

@@ -2,16 +2,17 @@ import { db } from '@/config/firebase';
 import type { HistoryBlock } from '@/types/historyBlock';
 import type { User } from '@/types/user';
 import {
-    collection,
-    deleteDoc,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    serverTimestamp,
-    setDoc,
-    updateDoc,
-    where,
+  collection,
+    collectionGroup,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
 } from 'firebase/firestore';
 import { distanceBetween, geohashQueryBounds } from 'geofire-common';
 
@@ -156,6 +157,34 @@ export async function removeBlockedAccount(currentUid: string, targetUid: string
 export async function isBlockedAccount(currentUid: string, targetUid: string): Promise<boolean> {
   const snap = await getDoc(doc(db, 'users', currentUid, 'blockedAccounts', targetUid));
   return snap.exists();
+}
+
+export async function hasEitherUserBlocked(userAUid: string, userBUid: string): Promise<boolean> {
+  const [aBlocksB, bBlocksA] = await Promise.all([
+    isBlockedAccount(userAUid, userBUid),
+    isBlockedAccount(userBUid, userAUid),
+  ]);
+  return aBlocksB || bBlocksA;
+}
+
+export async function getUsersWhoBlockedCurrentUser(currentUid: string): Promise<string[]> {
+  try {
+    const snap = await getDocs(
+      query(collectionGroup(db, 'blockedAccounts'), where('targetUid', '==', currentUid)),
+    );
+    const blockers = new Set<string>();
+    for (const d of snap.docs) {
+      const parentUserId = d.ref.parent.parent?.id;
+      if (parentUserId) blockers.add(parentUserId);
+    }
+    return [...blockers];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    // #region agent log
+    fetch('http://127.0.0.1:7298/ingest/97313dd6-65fa-4454-bb22-201405ef2283',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c36d6c'},body:JSON.stringify({sessionId:'c36d6c',runId:'pre-fix',hypothesisId:'H_rev_query_fail',location:'services/userService.ts:getUsersWhoBlockedCurrentUser',message:'reverse block query failed',data:{errorMessage:message.slice(0,200)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log
+    throw error;
+  }
 }
 
 export async function updateUser(
