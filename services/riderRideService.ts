@@ -1,15 +1,17 @@
 import { db } from '@/config/firebase';
+import type { RideRequest } from '@/types/rideRequest';
 import type { RiderRide } from '@/types/riderRide';
 import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  query,
-  serverTimestamp,
-  where,
+    addDoc,
+    collection,
+    doc,
+    getDocs,
+    query,
+    runTransaction,
+    serverTimestamp,
+    where
 } from 'firebase/firestore';
+import { createNotification } from './notificationService';
 
 export async function createRiderRide(
   data: Omit<RiderRide, 'createdAt' | 'status'>,
@@ -36,5 +38,76 @@ export async function getRiderRides(
 }
 
 export async function deleteRiderRide(rideId: string): Promise<void> {
-  await deleteDoc(doc(db, 'riderRides', rideId));
+  console.log('🟡 deleteRiderRide called with rideId:', rideId);
+  
+  try {
+    const rideRequestsSnap = await getDocs(
+      query(
+        collection(db, 'rideRequests'),
+        where('riderRideId', '==', rideId),
+      ),
+    );
+    console.log('🟡 Found', rideRequestsSnap.docs.length, 'ride requests for this ride');
+
+    const requestsToCancel = rideRequestsSnap.docs.filter(
+      d => ['pending', 'confirmed'].includes((d.data() as RideRequest).status),
+    );
+    console.log('🟡 Found', requestsToCancel.length, 'requests to cancel');
+
+    const confirmationsToDelete: string[] = [];
+    for (const requestDoc of requestsToCancel) {
+      const confirmationsSnap = await getDocs(
+        query(
+          collection(db, 'rideConfirmations'),
+          where('rideRequestId', '==', requestDoc.id),
+        ),
+      );
+      confirmationsSnap.docs.forEach(c => confirmationsToDelete.push(c.id));
+    }
+    console.log('🟡 Found', confirmationsToDelete.length, 'confirmations to delete');
+
+    console.log('🟡 Starting transaction...');
+    await runTransaction(db, async (tx) => {
+      console.log('🟡 Deleting riderRide:', rideId);
+      tx.delete(doc(db, 'riderRides', rideId));
+
+      for (const requestDoc of requestsToCancel) {
+        console.log('🟡 Cancelling request:', requestDoc.id);
+        tx.update(doc(db, 'rideRequests', requestDoc.id), {
+          status: 'cancelled',
+        });
+        
+        const rideRequest = requestDoc.data() as RideRequest;
+        if (rideRequest.scheduleBlockId) {
+          const blockRef = doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId);
+          const blockSnap = await tx.get(blockRef);
+          if (blockSnap.exists() && blockSnap.data()?.status === 'booked') {
+            console.log('🟡 Opening schedule block:', rideRequest.scheduleBlockId);
+            tx.update(blockRef, { status: 'open' });
+          }
+        }
+      }
+
+      for (const confirmationId of confirmationsToDelete) {
+        console.log('🟡 Deleting confirmation:', confirmationId);
+        tx.delete(doc(db, 'rideConfirmations', confirmationId));
+      }
+    });
+    console.log('✅ Transaction complete');
+
+    for (const requestDoc of requestsToCancel) {
+      const rideRequest = requestDoc.data() as RideRequest;
+      console.log('🟡 Sending notification to driver:', rideRequest.driverId);
+      await createNotification(
+        rideRequest.driverId,
+        'ride_cancelled',
+        requestDoc.id,
+        'The rider has cancelled this ride request.',
+      );
+    }
+    console.log('✅ deleteRiderRide complete');
+  } catch (error) {
+    console.error('❌ Error in deleteRiderRide:', error);
+    throw error;
+  }
 }

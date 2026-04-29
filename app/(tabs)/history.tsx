@@ -1,8 +1,8 @@
 import { useAuth } from '@/context/AuthContext';
 import { createNotification } from '@/services/notificationService';
 import { cancelRideRequest, confirmRideRequest, denyRideRequest } from '@/services/rideRequestService';
-import { createScheduleBlock } from '@/services/scheduleBlockService';
 import { createRiderRide, deleteRiderRide, getRiderRides } from '@/services/riderRideService';
+import { createScheduleBlock } from '@/services/scheduleBlockService';
 import { getUser } from '@/services/userService';
 import type { RideRequest } from '@/types/rideRequest';
 import type { RiderRide } from '@/types/riderRide';
@@ -11,6 +11,7 @@ import type { User } from '@/types/user';
 import { calculateDriveTime, formatDriveTime } from '@/utils/driveTime';
 import { forwardGeocode } from '@/utils/geocoding';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import {
   collection,
   deleteDoc,
@@ -19,7 +20,6 @@ import {
   query,
   where,
 } from 'firebase/firestore';
-import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -108,6 +108,13 @@ export default function ScheduleScreen() {
   // Rider-side modal (rider responds to driver-initiated requests)
   const [selectedIncoming, setSelectedIncoming] = useState<RideRequestWithId | null>(null);
   const [actingOnRide, setActingOnRide] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [pendingCancellation, setPendingCancellation] = useState<{
+    requestId: string;
+    otherUserId: string;
+    riderRideId?: string;
+  } | null>(null);
+  const [cancellationStatus, setCancellationStatus] = useState<string>('');
 
   // Rider: incoming match requests from drivers and confirmed requests
   const [incomingRequests, setIncomingRequests] = useState<RideRequestWithId[]>([]);
@@ -358,27 +365,65 @@ export default function ScheduleScreen() {
     }
   };
 
-  const handleCancelRideRequest = async (requestId: string, otherUserId: string) => {
-    Alert.alert('Cancel Ride', 'This will cancel your confirmed ride. Are you sure?', [
-      { text: 'Keep', style: 'cancel' },
-      {
-        text: 'Cancel Ride', style: 'destructive',
-        onPress: async () => {
-          setActingOnRide(true);
-          try {
-            await cancelRideRequest(requestId, user?.uid);
-            await createNotification(otherUserId, 'ride_cancelled', requestId, 'A ride has been cancelled.');
-            setSelectedRide(null);
-            setSelectedRiderRide(null);
-            await loadAll();
-          } catch (e: any) {
-            Alert.alert('Error', e.message ?? 'Could not cancel the ride.');
-          } finally {
-            setActingOnRide(false);
-          }
-        },
-      },
-    ]);
+  const handleCancelRideRequest = async (requestId: string, otherUserId: string, riderRideId?: string) => {
+    setPendingCancellation({ requestId, otherUserId, riderRideId });
+    setShowCancelConfirm(true);
+  };
+
+  const executeCancellation = async () => {
+    setCancellationStatus('Button clicked!');
+    if (!pendingCancellation) {
+      setCancellationStatus('Error: No pending cancellation');
+      return;
+    }
+    
+    const { requestId, otherUserId, riderRideId } = pendingCancellation;
+    console.log('🔥 Starting cancellation:', { requestId, otherUserId, riderRideId });
+    setCancellationStatus('Starting cancellation...');
+    setShowCancelConfirm(false);
+    setActingOnRide(true);
+    
+    try {
+      console.log('Step 1: Cancelling ride request...');
+      setCancellationStatus('Step 1/4: Cancelling request...');
+      await cancelRideRequest(requestId, user?.uid);
+      console.log('✅ Ride request cancelled');
+      
+      console.log('Step 2: Creating notification...');
+      setCancellationStatus('Step 2/4: Sending notification...');
+      await createNotification(otherUserId, 'ride_cancelled', requestId, 'A ride has been cancelled.');
+      console.log('✅ Notification sent');
+      
+      if (riderRideId && userProfile?.activeRole === 'rider') {
+        console.log('Step 3: Deleting rider ride:', riderRideId);
+        setCancellationStatus('Step 3/4: Deleting ride...');
+        await deleteRiderRide(riderRideId);
+        console.log('✅ Rider ride deleted');
+      } else {
+        console.log('⚠️ Skipping rider ride deletion. riderRideId:', riderRideId, 'role:', userProfile?.activeRole);
+        setCancellationStatus('Step 3/4: Skipped (no riderRideId)');
+      }
+      
+      console.log('Step 4: Closing modals and refreshing data...');
+      setCancellationStatus('Step 4/4: Refreshing...');
+      setSelectedRide(null);
+      setSelectedRiderRide(null);
+      setPendingCancellation(null);
+      
+      await loadAll();
+      console.log('✅ All complete! Data refreshed.');
+      setCancellationStatus('Complete!');
+      setTimeout(() => setCancellationStatus(''), 2000);
+    } catch (e: any) {
+      console.error('❌ Error during cancellation:', e);
+      console.error('Error message:', e.message);
+      console.error('Error stack:', e.stack);
+      setCancellationStatus('Error: ' + e.message);
+      Alert.alert('Error', e.message ?? 'Could not cancel the ride.');
+    } finally {
+      setActingOnRide(false);
+      console.log('🔥 Cancellation process finished');
+    }
   };
 
   const handleViewUserPage = (otherUser: User) => {
@@ -412,6 +457,13 @@ export default function ScheduleScreen() {
 
   return (
     <View style={styles.container}>
+
+      {/* Debug Status Banner */}
+      {cancellationStatus && (
+        <View style={{ backgroundColor: '#FF9500', padding: 10, alignItems: 'center' }}>
+          <Text style={{ color: '#fff', fontWeight: 'bold' }}>{cancellationStatus}</Text>
+        </View>
+      )}
 
       {/* Header */}
       <View style={styles.header}>
@@ -647,7 +699,15 @@ export default function ScheduleScreen() {
                       </View>
                       <TouchableOpacity
                         style={[styles.denyButton, { marginTop: 12 }, actingOnRide && styles.actionDisabled]}
-                        onPress={() => handleCancelRideRequest(ride.id, ride.riderId)}
+                        onPress={() => {
+                          console.log('🔵 Cancel Ride button pressed (driver modal)', { 
+                            rideId: ride.id, 
+                            riderId: ride.riderId, 
+                            riderRideId: ride.riderRideId,
+                            actingOnRide,
+                          });
+                          handleCancelRideRequest(ride.id, ride.riderId, ride.riderRideId);
+                        }}
                         disabled={actingOnRide}
                       >
                         {actingOnRide
@@ -674,15 +734,24 @@ export default function ScheduleScreen() {
           <TouchableOpacity
             style={{ flex: 1 }}
             activeOpacity={1}
-            onPress={() => { if (!actingOnRide) setSelectedRiderRide(null); }}
+            onPress={() => { 
+              if (!actingOnRide) setSelectedRiderRide(null); 
+            }}
           />
           <View style={styles.modalSheet}>
             <View style={styles.sheetHandle} />
+            <View style={{ flex: 1 }}>
+              <ScrollView 
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: 20 }}
+                keyboardShouldPersistTaps="handled"
+              >
             {selectedRiderRide && (() => {
               const ride = selectedRiderRide;
               const confirmed = confirmedRiderRequests.find(r => r.riderRideId === ride.id);
               const pendingIncoming = incomingRequests.filter(r => r.riderRideId === ride.id);
               const confirmedDriver = confirmed ? requestDrivers[confirmed.driverId] : null;
+              
               return (
                 <>
                   <View style={styles.modalHeader}>
@@ -757,7 +826,7 @@ export default function ScheduleScreen() {
                     {confirmed ? (
                       <TouchableOpacity
                         style={[styles.denyButton, actingOnRide && styles.actionDisabled]}
-                        onPress={() => handleCancelRideRequest(confirmed.id, confirmed.driverId)}
+                        onPress={() => handleCancelRideRequest(confirmed.id, confirmed.driverId, ride.id)}
                         disabled={actingOnRide}
                       >
                         {actingOnRide
@@ -780,6 +849,8 @@ export default function ScheduleScreen() {
                 </>
               );
             })()}
+            </ScrollView>
+            </View>
           </View>
         </View>
       </Modal>
@@ -857,6 +928,46 @@ export default function ScheduleScreen() {
                 </>
               );
             })()}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Custom Cancel Confirmation Modal ───────────────────────────────────── */}
+      <Modal
+        visible={showCancelConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowCancelConfirm(false);
+          setPendingCancellation(null);
+        }}
+      >
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmBox}>
+            <Text style={styles.confirmTitle}>Cancel Ride</Text>
+            <Text style={styles.confirmMessage}>
+              This will cancel your confirmed ride. Are you sure?
+            </Text>
+            <View style={styles.confirmButtons}>
+              <TouchableOpacity
+                style={[styles.confirmButton, styles.confirmKeep]}
+                onPress={() => {
+                  setShowCancelConfirm(false);
+                  setPendingCancellation(null);
+                }}
+              >
+                <Text style={styles.confirmKeepText}>Keep Ride</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmButton, styles.confirmCancel]}
+                onPress={() => {
+                  console.log('🔴 CANCEL RIDE BUTTON IN DIALOG CLICKED!');
+                  executeCancellation();
+                }}
+              >
+                <Text style={styles.confirmCancelText}>Cancel Ride</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1022,7 +1133,9 @@ function RiderDayContent({
           <TouchableOpacity
             key={ride.id}
             style={[styles.riderRideCard, isConfirmed && styles.riderRideCardConfirmed]}
-            onPress={() => onRideTap(ride)}
+            onPress={() => {
+              onRideTap(ride);
+            }}
             activeOpacity={0.75}
           >
             <View style={styles.riderRideCardRow}>
@@ -1415,7 +1528,7 @@ const styles = StyleSheet.create({
   },
   modalSheet: {
     backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingHorizontal: 24, paddingBottom: 40, paddingTop: 12, maxHeight: '88%',
+    paddingHorizontal: 24, paddingBottom: 20, paddingTop: 12, maxHeight: '88%',
   },
   sheetHandle: {
     width: 40, height: 4, borderRadius: 2, backgroundColor: '#d1d1d6',
@@ -1512,4 +1625,68 @@ const styles = StyleSheet.create({
   },
   submitButtonDisabled: { opacity: 0.55 },
   submitButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+
+  // ── Custom Confirmation Modal
+  confirmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  confirmBox: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  confirmTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1c1c1e',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  confirmMessage: {
+    fontSize: 16,
+    color: '#636366',
+    marginBottom: 24,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  confirmButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  confirmButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmKeep: {
+    backgroundColor: '#f2f2f7',
+    borderWidth: 1,
+    borderColor: '#e5e5ea',
+  },
+  confirmKeepText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  confirmCancel: {
+    backgroundColor: '#FF3B30',
+  },
+  confirmCancelText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
 });
