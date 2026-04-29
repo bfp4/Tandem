@@ -64,6 +64,9 @@ export default function DriverDetailsScreen() {
   } catch {
     matchingRides = [];
   }
+  // #region agent log
+  fetch('http://127.0.0.1:7298/ingest/97313dd6-65fa-4454-bb22-201405ef2283',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'544fc0'},body:JSON.stringify({sessionId:'544fc0',runId:'pre-fix',hypothesisId:'H1',location:'app/driver-details.tsx:params-parse',message:'parsed route params',data:{otherId,myRole,matchingRideCount:matchingRides.length},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion agent log
 
   // Track which riderRideIds already have a pending request so we don't duplicate
   const [requestedRideIds, setRequestedRideIds] = useState<Set<string>>(new Set());
@@ -108,6 +111,9 @@ export default function DriverDetailsScreen() {
         }
       });
       setRequestedRideIds(alreadyRequestedIds);
+      // #region agent log
+      fetch('http://127.0.0.1:7298/ingest/97313dd6-65fa-4454-bb22-201405ef2283',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'544fc0'},body:JSON.stringify({sessionId:'544fc0',runId:'pre-fix',hypothesisId:'H2',location:'app/driver-details.tsx:checkExistingRequests',message:'existing requests loaded',data:{riderId1,driverId1,riderId2,driverId2,requestedCount:alreadyRequestedIds.size},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion agent log
     } catch (e) {
       console.warn('Could not load existing requests:', e);
     } finally {
@@ -122,6 +128,9 @@ export default function DriverDetailsScreen() {
     const driverId = myRole === 'rider' ? otherId : user.uid;
     const initiatedBy = myRole as 'rider' | 'driver';
     const notifyUserId = myRole === 'rider' ? driverId : riderId;
+    // #region agent log
+    fetch('http://127.0.0.1:7298/ingest/97313dd6-65fa-4454-bb22-201405ef2283',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'544fc0'},body:JSON.stringify({sessionId:'544fc0',runId:'pre-fix',hypothesisId:'H3',location:'app/driver-details.tsx:handleRequestMatch',message:'request match initiated',data:{rideId:ride.riderRideId,riderId,driverId,notifyUserId,initiatedBy},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log
 
     setSubmittingRideId(ride.riderRideId);
     try {
