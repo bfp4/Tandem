@@ -2,21 +2,20 @@ import { db } from '@/config/firebase';
 import type { RideRequest } from '@/types/rideRequest';
 import type { ScheduleBlock } from '@/types/scheduleBlock';
 import type { User } from '@/types/user';
-import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  runTransaction,
-  serverTimestamp,
-  updateDoc,
-  where,
-} from 'firebase/firestore';
 import { calculateDriveTime } from '@/utils/driveTime';
+import {
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    runTransaction,
+    serverTimestamp,
+    updateDoc,
+    where,
+} from 'firebase/firestore';
 import { createNotification } from './notificationService';
-import { splitBlock } from './scheduleBlockService';
 
 export interface RideRequestWithId extends RideRequest {
   id: string;
@@ -179,10 +178,13 @@ export async function cancelRideRequest(
 
     tx.update(requestRef, { status: 'cancelled' });
 
-    const blockRef = doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId);
-    const blockSnap = await tx.get(blockRef);
-    if (blockSnap.exists() && blockSnap.data()?.status === 'booked') {
-      tx.update(blockRef, { status: 'open' });
+    // Only try to update schedule block if there's a valid ID
+    if (rideRequest.scheduleBlockId && rideRequest.scheduleBlockId.trim() !== '') {
+      const blockRef = doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId);
+      const blockSnap = await tx.get(blockRef);
+      if (blockSnap.exists() && blockSnap.data()?.status === 'booked') {
+        tx.update(blockRef, { status: 'open' });
+      }
     }
 
     for (const ref of confirmationRefs) {
