@@ -10,10 +10,19 @@ export interface PricingSnapshot {
 
 /** Collection: /rideRequests/{requestId} */
 export interface RideRequest {
-  /** The block the rider tapped */
+  /** The block the rider tapped (empty string when request originates from matching, not a block) */
   scheduleBlockId: string;
   driverId: string;
   riderId: string;
+  /** ID of the riderRide document this request was generated from */
+  riderRideId?: string;
+  /**
+   * Who initiated the match request.
+   * 'rider'  → rider asked the driver; driver must accept/deny.
+   * 'driver' → driver asked the rider; rider must accept/deny.
+   * Undefined on legacy documents — treat as 'rider' for backward compat.
+   */
+  initiatedBy?: 'rider' | 'driver';
   /** "HH:MM" — on a 15-min interval */
   requestedStart: string;
   /** "HH:MM" — on a 15-min interval */

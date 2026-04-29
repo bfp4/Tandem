@@ -1,7 +1,37 @@
-const cache = new Map<string, string>();
+const reverseCache = new Map<string, string>();
+const forwardCache = new Map<string, { lat: number; lng: number } | null>();
 
 function cacheKey(lat: number, lng: number): string {
   return `${lat.toFixed(5)},${lng.toFixed(5)}`;
+}
+
+/**
+ * Forward-geocodes an address string into lat/lng coordinates using Nominatim.
+ * Returns null if the address cannot be resolved.
+ */
+export async function forwardGeocode(
+  address: string,
+): Promise<{ lat: number; lng: number } | null> {
+  const key = address.trim().toLowerCase();
+  if (forwardCache.has(key)) return forwardCache.get(key) ?? null;
+
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
+      { headers: { 'Accept-Language': 'en', 'User-Agent': 'HuberApp/1.0' } },
+    );
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) {
+      forwardCache.set(key, null);
+      return null;
+    }
+    const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    forwardCache.set(key, result);
+    return result;
+  } catch {
+    forwardCache.set(key, null);
+    return null;
+  }
 }
 
 /**
@@ -14,7 +44,7 @@ export async function reverseGeocode(
   lng: number,
 ): Promise<string> {
   const key = cacheKey(lat, lng);
-  const cached = cache.get(key);
+  const cached = reverseCache.get(key);
   if (cached) return cached;
 
   try {
@@ -33,11 +63,11 @@ export async function reverseGeocode(
     ].filter(Boolean);
 
     const label = parts.length > 0 ? parts.join(', ') : data.display_name ?? `${lat}, ${lng}`;
-    cache.set(key, label);
+    reverseCache.set(key, label);
     return label;
   } catch {
     const fallback = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-    cache.set(key, fallback);
+    reverseCache.set(key, fallback);
     return fallback;
   }
 }

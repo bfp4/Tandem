@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -106,12 +107,10 @@ export default function MatchScreen() {
     if (!profile) return;
     setLoading(true);
     try {
-      const role = profile.activeRole === 'driver' ? 'rider' : 'driver';
       const matched = await getMatchedUsers(
-        profile as any,
+        profile,
         location?.lat ?? null,
         location?.lng ?? null,
-        role,
         maxDistance,
       );
       if (!user?.uid) {
@@ -190,7 +189,8 @@ export default function MatchScreen() {
         bio: result.user.bio ?? '',
         distance: result.distanceMiles.toFixed(1),
         score: Math.round(result.score * 100).toString(),
-        scheduleOverlap: result.scheduleOverlapPercent.toString(),
+        matchingRides: JSON.stringify(result.matchingRides),
+        myRole: currentUserProfile?.activeRole ?? 'rider',
       },
     });
   };
@@ -352,8 +352,10 @@ export default function MatchScreen() {
               {item.distanceMiles < 0.1 ? 'Nearby' : `${item.distanceMiles.toFixed(1)} mi away`}
             </Text>
             <Text style={styles.separator}>·</Text>
-            <Ionicons name="time" size={12} color="#666" />
-            <Text style={styles.detailText}>{item.scheduleOverlapPercent}% schedule match</Text>
+            <Ionicons name="calendar" size={12} color="#666" />
+            <Text style={styles.detailText}>
+              {item.matchingRides.length} matching ride{item.matchingRides.length !== 1 ? 's' : ''}
+            </Text>
           </View>
         </View>
         <View style={styles.rightHeaderColumn}>
@@ -619,6 +621,8 @@ export default function MatchScreen() {
     </View>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {
