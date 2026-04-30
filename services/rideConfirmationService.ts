@@ -2,11 +2,14 @@ import { db } from '@/config/firebase';
 import type { HistoryBlock } from '@/types/historyBlock';
 import type { RideConfirmation } from '@/types/rideConfirmation';
 import type { RideRequest } from '@/types/rideRequest';
+import { FirebaseError } from 'firebase/app';
 import {
   addDoc,
   collection,
   doc,
   getDoc,
+  getDocs,
+  limit,
   onSnapshot,
   query,
   runTransaction,
@@ -22,6 +25,80 @@ export interface RideConfirmationWithId extends RideConfirmation {
 }
 
 const DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+
+/** Confirmed ride lifecycle statuses shown on Home / Rides tabs (not historical `completed`). */
+export const ACTIVE_RIDE_CONFIRMATION_STATUSES = [
+  'waiting',
+  'both_ready',
+  'in_progress',
+] as const satisfies readonly RideConfirmation['status'][];
+
+const PER_ROLE_FETCH_LIMIT = 120;
+
+function logRideConfirmations(
+  message: string,
+  payload?: Record<string, unknown>,
+): void {
+  if (!__DEV__) return;
+  if (payload !== undefined) {
+    console.log('[RideConfirmations]', message, payload);
+  } else {
+    console.log('[RideConfirmations]', message);
+  }
+}
+
+function firestoreErrDetail(err: unknown): { code?: string; message: string } {
+  if (err instanceof FirebaseError) {
+    return { code: err.code, message: err.message };
+  }
+  if (err instanceof Error) {
+    return { message: err.message };
+  }
+  return { message: String(err) };
+}
+
+/** True when confirmation should appear in active/upcoming ride lists */
+export function isActiveConfirmationStatus(status: RideConfirmation['status']): boolean {
+  return ACTIVE_RIDE_CONFIRMATION_STATUSES.some((s) => s === status);
+}
+
+/** Merge driver + rider query rows, dedupe by doc id */
+function mergeDriverAndRiderDocs(
+  driverDocs: RideConfirmationWithId[],
+  riderDocs: RideConfirmationWithId[],
+): RideConfirmationWithId[] {
+  const map = new Map<string, RideConfirmationWithId>();
+  for (const c of [...driverDocs, ...riderDocs]) {
+    map.set(c.id, c);
+  }
+  return [...map.values()];
+}
+
+/**
+ * Queries `rideConfirmations` by driverId and riderId only (no `status` filter).
+ * Compound `status IN` indexes are easy to omit in deployment; equality on one field uses the default single-field index.
+ */
+function confirmationsForDriverQuery(userId: string) {
+  return query(
+    collection(db, 'rideConfirmations'),
+    where('driverId', '==', userId),
+    limit(PER_ROLE_FETCH_LIMIT),
+  );
+}
+
+function confirmationsForRiderQuery(userId: string) {
+  return query(
+    collection(db, 'rideConfirmations'),
+    where('riderId', '==', userId),
+    limit(PER_ROLE_FETCH_LIMIT),
+  );
+}
+
+function filterSubscriptionsRows(
+  merged: RideConfirmationWithId[],
+): RideConfirmationWithId[] {
+  return merged.filter((c) => isActiveConfirmationStatus(c.status));
+}
 
 /**
  * Returns the next date matching one of `repeatDays` strictly after `afterDate`.
@@ -208,45 +285,106 @@ export async function getConfirmationById(
 }
 
 /**
- * Real-time listener for all ride confirmations involving a user (as driver or rider)
- * that are in an active lifecycle state (waiting, both_ready, in_progress).
+ * One-time fetch: same logic as subscription merge + lifecycle filter (for backup refresh).
+ */
+export async function fetchUserConfirmationsOnce(
+  userId: string,
+): Promise<RideConfirmationWithId[]> {
+  logRideConfirmations('fetchUserConfirmationsOnce start', {
+    uid: userId,
+    collection: 'rideConfirmations',
+    queries: ['driverId == uid', 'riderId == uid'],
+    lifecycleFilter: [...ACTIVE_RIDE_CONFIRMATION_STATUSES],
+  });
+
+  try {
+    const driverQ = confirmationsForDriverQuery(userId);
+    const riderQ = confirmationsForRiderQuery(userId);
+    const [driverSnap, riderSnap] = await Promise.all([
+      getDocs(driverQ),
+      getDocs(riderQ),
+    ]);
+
+    logRideConfirmations('fetchUserConfirmationsOnce snapshots', {
+      driverDocCount: driverSnap.size,
+      riderDocCount: riderSnap.size,
+      driverFromCache: driverSnap.metadata.fromCache,
+      riderFromCache: riderSnap.metadata.fromCache,
+    });
+
+    const driverResults = driverSnap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as RideConfirmation),
+    }));
+    const riderResults = riderSnap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as RideConfirmation),
+    }));
+    const merged = mergeDriverAndRiderDocs(driverResults, riderResults);
+    const uniqueStatuses = [...new Set(merged.map((m) => m.status))];
+
+    logRideConfirmations('fetchUserConfirmationsOnce merged', {
+      mergedCount: merged.length,
+      statusesPresent: uniqueStatuses,
+      lifecycleMatchCount: filterSubscriptionsRows(merged).length,
+    });
+
+    return filterSubscriptionsRows(merged);
+  } catch (e) {
+    const detail = firestoreErrDetail(e);
+    logRideConfirmations('fetchUserConfirmationsOnce error', detail);
+    throw e instanceof Error ? e : new Error(detail.message);
+  }
+}
+
+/**
+ * Real-time listener for ride confirmations involving a user (driver or rider).
  *
- * Firestore doesn't support OR across different fields in one query, so we run
- * two parallel listeners and merge/deduplicate results.
+ * Queries only `driverId` / `riderId` (plus limit) — no compound `status` filter — so Firebase’s
+ * default single-field indexes suffice. Rows are filtered to waiting / both_ready / in_progress client-side.
  */
 export function subscribeToUserConfirmations(
   userId: string,
   onUpdate: (confirmations: RideConfirmationWithId[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  const ACTIVE_STATUSES: RideConfirmation['status'][] = [
-    'waiting',
-    'both_ready',
-    'in_progress',
-  ];
-
   let driverResults: RideConfirmationWithId[] = [];
   let riderResults: RideConfirmationWithId[] = [];
 
-  function merge() {
-    const map = new Map<string, RideConfirmationWithId>();
-    for (const c of [...driverResults, ...riderResults]) {
-      map.set(c.id, c);
-    }
-    onUpdate([...map.values()]);
+  function merge(): void {
+    const mergedRaw = mergeDriverAndRiderDocs(driverResults, riderResults);
+    const activeOnly = filterSubscriptionsRows(mergedRaw);
+    const uniqueStatuses = [...new Set(mergedRaw.map((m) => m.status))];
+
+    logRideConfirmations('subscribe snapshot merge', {
+      uid: userId,
+      rawDriverDocs: driverResults.length,
+      rawRiderDocs: riderResults.length,
+      mergedBeforeFilter: mergedRaw.length,
+      afterLifecycleFilter: activeOnly.length,
+      mergedStatusesSample: uniqueStatuses.slice(0, 12),
+    });
+
+    onUpdate(activeOnly);
   }
 
-  const driverQuery = query(
-    collection(db, 'rideConfirmations'),
-    where('driverId', '==', userId),
-    where('status', 'in', ACTIVE_STATUSES),
-  );
+  logRideConfirmations('subscribe attach', {
+    uid: userId,
+    collection: 'rideConfirmations',
+    driverQueryFields: ['driverId', '__name__'],
+    riderQueryFields: ['riderId', '__name__'],
+    perQueryLimit: PER_ROLE_FETCH_LIMIT,
+    lifecycleStatuses: [...ACTIVE_RIDE_CONFIRMATION_STATUSES],
+  });
 
-  const riderQuery = query(
-    collection(db, 'rideConfirmations'),
-    where('riderId', '==', userId),
-    where('status', 'in', ACTIVE_STATUSES),
-  );
+  const driverQuery = confirmationsForDriverQuery(userId);
+  const riderQuery = confirmationsForRiderQuery(userId);
+
+  function reportListenerError(side: 'driver' | 'rider', raw: unknown): void {
+    const detail = firestoreErrDetail(raw);
+    console.error('[RideConfirmations] subscribe listener error', side, detail);
+    onError?.(raw instanceof Error ? raw : new Error(detail.message));
+  }
 
   const unsubDriver = onSnapshot(
     driverQuery,
@@ -255,13 +393,19 @@ export function subscribeToUserConfirmations(
         id: d.id,
         ...(d.data() as RideConfirmation),
       }));
+      logRideConfirmations('subscribe driver snapshot', {
+        uid: userId,
+        size: snap.size,
+        fromCache: snap.metadata.fromCache,
+        hasPendingWrites: snap.metadata.hasPendingWrites,
+      });
       merge();
     },
     (error) => {
-      console.error('subscribeToUserConfirmations (driver) error:', error);
-      driverResults = [];
+      reportListenerError('driver', error);
+      logRideConfirmations('subscribe driver FAILED — fallback fetch recommended', firestoreErrDetail(error));
+      // Preserve last driver snapshot after error (offline / rules / index transient failure).
       merge();
-      onError?.(error);
     },
   );
 
@@ -272,13 +416,18 @@ export function subscribeToUserConfirmations(
         id: d.id,
         ...(d.data() as RideConfirmation),
       }));
+      logRideConfirmations('subscribe rider snapshot', {
+        uid: userId,
+        size: snap.size,
+        fromCache: snap.metadata.fromCache,
+        hasPendingWrites: snap.metadata.hasPendingWrites,
+      });
       merge();
     },
     (error) => {
-      console.error('subscribeToUserConfirmations (rider) error:', error);
-      riderResults = [];
+      reportListenerError('rider', error);
+      logRideConfirmations('subscribe rider FAILED — fallback fetch recommended', firestoreErrDetail(error));
       merge();
-      onError?.(error);
     },
   );
 
