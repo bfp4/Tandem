@@ -60,6 +60,7 @@ export default function AccountScreen() {
   const [securityNewPassword, setSecurityNewPassword] = useState('');
   const [securityNewEmail, setSecurityNewEmail] = useState('');
   const [securitySaving, setSecuritySaving] = useState(false);
+  const starRatingValue = Math.max(0, Math.min(5, Number.parseInt(starRating, 10) || 0));
 
   // Preferences (Account Center)
   const [prefNotificationsEnabled, setPrefNotificationsEnabled] = useState(true);
@@ -555,10 +556,6 @@ export default function AccountScreen() {
             placeholderTextColor="#999"
           />
         </View>
-        <TouchableOpacity style={styles.accountCenterButton} onPress={handleOpenAccountCenter}>
-          <Ionicons name="person-circle-outline" size={20} color="#fff" />
-          <Text style={styles.accountCenterButtonText}>Open Account Center</Text>
-        </TouchableOpacity>
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Role</Text>
           <View style={styles.infoBox}>
@@ -569,7 +566,21 @@ export default function AccountScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Star Rating</Text>
           <View style={styles.infoBox}>
-            <Text style={styles.infoText}>{starRating || 'Not added yet'}</Text>
+            {starRating ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {Array.from({ length: 5 }).map((_, idx) => (
+                  <Ionicons
+                    key={idx}
+                    name={idx < starRatingValue ? 'star' : 'star-outline'}
+                    size={18}
+                    color="#F5B301"
+                    style={idx === 4 ? undefined : { marginRight: 2 }}
+                  />
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.infoText}>Not added yet</Text>
+            )}
           </View>
         </View>
 
@@ -601,6 +612,10 @@ export default function AccountScreen() {
         )}
 
 
+        <TouchableOpacity style={styles.accountCenterButton} onPress={handleOpenAccountCenter}>
+          <Ionicons name="person-circle-outline" size={20} color="#fff" />
+          <Text style={styles.accountCenterButtonText}>Open Account Center</Text>
+        </TouchableOpacity>
         <TouchableOpacity 
           style={styles.saveButton} 
           onPress={handleSaveProfile}
