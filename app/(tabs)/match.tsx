@@ -1,6 +1,15 @@
 import { useAuth } from '@/context/AuthContext';
 import { getMatchedUsers, type MatchResult } from '@/services/matchingService';
-import { getUser } from '@/services/userService';
+import {
+  addBlockedAccount,
+  addFavorite,
+  getUser,
+  hasEitherUserBlocked,
+  isBlockedAccount,
+  isFavorited,
+  removeBlockedAccount,
+  removeFavorite,
+} from '@/services/userService';
 import type { User } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -8,7 +17,6 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   ScrollView,
@@ -16,7 +24,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 const DISTANCE_STEPS = [5, 10, 15, 25, 50, 100];
@@ -35,6 +43,17 @@ export default function MatchScreen() {
   const [loading, setLoading] = useState(true);
   const [hasLocation, setHasLocation] = useState(false);
   const locationRef = useRef<{ lat: number; lng: number } | null>(null);
+
+  const [blockedFilterMessage, setBlockedFilterMessage] = useState('');
+  const [openMenuForUserId, setOpenMenuForUserId] = useState<string | null>(null);
+  const [actionMenuMessage, setActionMenuMessage] = useState('');
+  const closeMenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [menuStatus, setMenuStatus] = useState<{ favorited: boolean; blocked: boolean; loading: boolean }>({
+    favorited: false,
+    blocked: false,
+    loading: false,
+  });
+  const [confirmBlockForMenuKey, setConfirmBlockForMenuKey] = useState<string | null>(null);
 
   useEffect(() => {
     init();
@@ -55,7 +74,6 @@ export default function MatchScreen() {
       profile = await getUser(user.uid);
       setCurrentUserProfile(profile);
     } catch {
-      Alert.alert('Error', 'Could not load your profile.');
       setLoading(false);
       return;
     }
@@ -93,9 +111,40 @@ export default function MatchScreen() {
         location?.lng ?? null,
         maxDistance,
       );
-      setResults(matched);
-    } catch (e) {
-      console.error('Error loading matches:', e);
+      if (!user?.uid) {
+        setResults(matched);
+        return;
+      }
+
+      const currentUid = user.uid;
+      const targetIds = Array.from(
+        new Set(
+          matched
+            .map((r) => (r.user as any)?.uid ?? (r.user as any)?.id)
+            .filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
+        ),
+      );
+
+      try {
+        const checks = await Promise.all(
+          targetIds.map(async (targetUid) => ({
+            targetUid,
+            eitherBlocked: await hasEitherUserBlocked(currentUid, targetUid),
+          })),
+        );
+        const blockedSet = new Set(checks.filter((c) => c.eitherBlocked).map((c) => c.targetUid));
+        const filtered = matched.filter((r) => {
+          const id = (r.user as any)?.uid ?? (r.user as any)?.id;
+          return typeof id === 'string' ? !blockedSet.has(id) : true;
+        });
+        setResults(filtered);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        setBlockedFilterMessage(`Could not verify blocks — showing all matches. (${message})`);
+        setTimeout(() => setBlockedFilterMessage(''), 3500);
+        setResults(matched);
+      }
+    } catch {
     } finally {
       setLoading(false);
     }
@@ -144,8 +193,146 @@ export default function MatchScreen() {
     });
   };
 
-  const renderMatch = ({ item }: { item: MatchResult }) => (
-    <View style={styles.matchCard}>
+  const getActionUserId = (match: MatchResult): string | null => {
+    const anyUser = match.user as any;
+    const id = (match.user as any)?.uid ?? anyUser?.id;
+    return typeof id === 'string' && id.trim().length > 0 ? id : null;
+  };
+
+  const scheduleMenuClose = (delayMs: number = 1500) => {
+    if (closeMenuTimerRef.current) clearTimeout(closeMenuTimerRef.current);
+    closeMenuTimerRef.current = setTimeout(() => {
+      setOpenMenuForUserId(null);
+      setActionMenuMessage('');
+      setConfirmBlockForMenuKey(null);
+    }, delayMs);
+  };
+
+  const loadMenuStatus = async (targetUid: string) => {
+    if (!user?.uid) return;
+    setMenuStatus((s) => ({ ...s, loading: true }));
+    try {
+      const [fav, blocked] = await Promise.all([
+        isFavorited(user.uid, targetUid),
+        isBlockedAccount(user.uid, targetUid),
+      ]);
+      setMenuStatus({ favorited: fav, blocked, loading: false });
+    } catch {
+      setMenuStatus((s) => ({ ...s, loading: false }));
+    }
+  };
+
+  const handleFavorite = async (match: MatchResult) => {
+    const targetUid = getActionUserId(match);
+    if (!targetUid) {
+      setActionMenuMessage('Unable to complete action because this user is missing an ID.');
+      scheduleMenuClose();
+      return;
+    }
+
+    const currentUid = user?.uid;
+    if (!currentUid) {
+      setActionMenuMessage('Failed to add favorite: Missing current user ID');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    try {
+      if (menuStatus.favorited) {
+        await removeFavorite(currentUid, targetUid);
+        setMenuStatus((s) => ({ ...s, favorited: false }));
+        setActionMenuMessage('Removed from favorites');
+      } else {
+        await addFavorite(currentUid, {
+          uid: targetUid,
+          name: match.user.name,
+          activeRole: (match.user as any).activeRole ?? null,
+        });
+        setMenuStatus((s) => ({ ...s, favorited: true }));
+        setActionMenuMessage('Added to favorites');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setActionMenuMessage(`Failed to update favorite: ${message}`);
+      scheduleMenuClose(3000);
+      return;
+    }
+    scheduleMenuClose();
+  };
+
+  const handleConfirmBlock = async (match: MatchResult) => {
+    const targetUid = getActionUserId(match);
+    if (!targetUid) {
+      setActionMenuMessage('Unable to complete action because this user is missing an ID.');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    const currentUid = user?.uid;
+    if (!currentUid) {
+      setActionMenuMessage('Failed to block account: Missing current user ID');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    try {
+      await addBlockedAccount(currentUid, {
+        uid: targetUid,
+        name: match.user.name,
+        activeRole: (match.user as any).activeRole ?? null,
+      });
+      setMenuStatus((s) => ({ ...s, blocked: true }));
+      setActionMenuMessage('Blocked account');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setActionMenuMessage(`Failed to block account: ${message}`);
+      scheduleMenuClose(3000);
+      return;
+    }
+    scheduleMenuClose();
+  };
+
+  const handleBlockToggle = async (match: MatchResult, menuKey: string) => {
+    const targetUid = getActionUserId(match);
+    if (!targetUid) {
+      setActionMenuMessage('Unable to complete action because this user is missing an ID.');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    const currentUid = user?.uid;
+    if (!currentUid) {
+      setActionMenuMessage('Failed to block account: Missing current user ID');
+      scheduleMenuClose(3000);
+      return;
+    }
+
+    if (menuStatus.blocked) {
+      try {
+        await removeBlockedAccount(currentUid, targetUid);
+        setMenuStatus((s) => ({ ...s, blocked: false }));
+        setActionMenuMessage('Unblocked account');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        setActionMenuMessage(`Failed to unblock account: ${message}`);
+        scheduleMenuClose(3000);
+        return;
+      }
+      scheduleMenuClose();
+      return;
+    }
+
+    setConfirmBlockForMenuKey(menuKey);
+    setActionMenuMessage('Block this user?');
+  };
+
+  const renderMatch = ({ item, index }: { item: MatchResult; index: number }) => {
+    const userId = getActionUserId(item);
+    const menuKey = userId ?? `missing-id-${index}`;
+    const menuOpen = openMenuForUserId === menuKey;
+    const confirmBlockOpen = confirmBlockForMenuKey === menuKey;
+    return (
+    <View style={[styles.matchCard, menuOpen && styles.matchCardMenuOpen]}>
       <View style={styles.matchHeader}>
         <View style={styles.avatar}>
           <Ionicons name="person" size={32} color="#999" />
@@ -169,9 +356,102 @@ export default function MatchScreen() {
             </Text>
           </View>
         </View>
-        <View style={styles.scoreContainer}>
-          <Text style={styles.scoreValue}>{Math.round(item.score * 100)}%</Text>
-          <Text style={styles.scoreLabel}>match</Text>
+        <View style={styles.rightHeaderColumn}>
+          <TouchableOpacity
+            style={styles.cardMenuButton}
+            onPress={() => {
+              setActionMenuMessage('');
+              setConfirmBlockForMenuKey(null);
+              setOpenMenuForUserId(prev => {
+                const next = prev === menuKey ? null : menuKey;
+                if (next === menuKey && userId) void loadMenuStatus(userId);
+                return next;
+              });
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile actions"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="ellipsis-vertical" size={18} color="#666" />
+          </TouchableOpacity>
+
+          {menuOpen ? (
+            <View style={styles.cardActionMenu}>
+              {!confirmBlockOpen ? (
+                <>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.cardActionMenuItem,
+                      pressed && styles.cardActionMenuItemPressed,
+                    ]}
+                    onPress={() => {
+                      void handleFavorite(item);
+                    }}
+                  >
+                    <Text style={styles.cardActionMenuText}>
+                      {menuStatus.favorited ? 'Remove Favorite' : 'Favorite'}
+                    </Text>
+                  </Pressable>
+                  <View style={styles.cardActionMenuDivider} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.cardActionMenuItem,
+                      pressed && styles.cardActionMenuItemPressed,
+                    ]}
+                    onPress={() => {
+                      void handleBlockToggle(item, menuKey);
+                    }}
+                  >
+                    <Text style={styles.cardActionMenuText}>
+                      {menuStatus.blocked ? 'Unblock' : 'Block'}
+                    </Text>
+                  </Pressable>
+                </>
+              ) : (
+                <View style={styles.cardActionMenuConfirm}>
+                  <Text style={styles.cardActionMenuMessage}>Block this user?</Text>
+                  <View style={styles.cardActionMenuConfirmRow}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.cardActionMenuConfirmButton,
+                        pressed && styles.cardActionMenuItemPressed,
+                      ]}
+                      onPress={() => {
+                        setConfirmBlockForMenuKey(null);
+                        setActionMenuMessage('');
+                      }}
+                    >
+                      <Text style={styles.cardActionMenuConfirmText}>Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.cardActionMenuConfirmButton,
+                        styles.cardActionMenuConfirmDangerButton,
+                        pressed && styles.cardActionMenuItemPressed,
+                      ]}
+                      onPress={() => {
+                        setConfirmBlockForMenuKey(null);
+                        void handleConfirmBlock(item);
+                      }}
+                    >
+                      <Text style={styles.cardActionMenuConfirmText}>Confirm Block</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+              {actionMenuMessage ? (
+                <>
+                  <View style={styles.cardActionMenuDivider} />
+                  <Text style={styles.cardActionMenuMessage}>{actionMenuMessage}</Text>
+                </>
+              ) : null}
+            </View>
+          ) : null}
+
+          <View style={styles.scoreContainer}>
+            <Text style={styles.scoreValue}>{Math.round(item.score * 100)}%</Text>
+            <Text style={styles.scoreLabel}>match</Text>
+          </View>
         </View>
       </View>
 
@@ -186,7 +466,8 @@ export default function MatchScreen() {
         </TouchableOpacity>
       </View>
     </View>
-  );
+    );
+  };
 
   const roleLookingFor = currentUserProfile?.activeRole === 'driver' ? 'Riders' : 'Drivers';
   const filtersActive = selectedRating !== null || maxDistance !== 25;
@@ -233,6 +514,10 @@ export default function MatchScreen() {
         </TouchableOpacity>
       </View>
 
+      {blockedFilterMessage ? (
+        <Text style={styles.blockedFilterMessage}>{blockedFilterMessage}</Text>
+      ) : null}
+
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#007AFF" />
@@ -250,7 +535,13 @@ export default function MatchScreen() {
         <FlatList
           data={filteredResults}
           renderItem={renderMatch}
-          keyExtractor={item => item.user.uid}
+          keyExtractor={(item, index) =>
+            (item.user as any)?.uid ?? (item.user as any)?.id ?? String(index)
+          }
+          onScrollBeginDrag={() => {
+            setOpenMenuForUserId(null);
+            setActionMenuMessage('');
+          }}
           contentContainerStyle={styles.listContent}
         />
       )}
@@ -367,6 +658,13 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e0e0e0',
     gap: 8,
   },
+  blockedFilterMessage: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    color: '#666',
+    fontSize: 12,
+  },
   searchBar: {
     flex: 1,
     flexDirection: 'row',
@@ -416,6 +714,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 2,
+    position: 'relative',
+    overflow: 'visible',
+  },
+  matchCardMenuOpen: {
+    zIndex: 50,
+    elevation: 12,
   },
   matchHeader: {
     flexDirection: 'row',
@@ -477,6 +781,88 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     marginLeft: 8,
+  },
+  rightHeaderColumn: {
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    marginLeft: 8,
+    position: 'relative',
+    zIndex: 60,
+    elevation: 12,
+  },
+  cardMenuButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  cardActionMenu: {
+    position: 'relative',
+    alignSelf: 'flex-end',
+    marginTop: 8,
+    width: 150,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#eaeaea',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 24,
+    zIndex: 999,
+  },
+  cardActionMenuItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  cardActionMenuItemPressed: {
+    backgroundColor: '#f5f5f5',
+  },
+  cardActionMenuText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  cardActionMenuMessage: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 16,
+  },
+  cardActionMenuConfirm: {
+    paddingTop: 6,
+    paddingBottom: 2,
+  },
+  cardActionMenuConfirmRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+  },
+  cardActionMenuConfirmButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    alignItems: 'center',
+  },
+  cardActionMenuConfirmDangerButton: {
+    borderColor: '#FF3B30',
+  },
+  cardActionMenuConfirmText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#333',
+  },
+  cardActionMenuDivider: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
   },
   scoreValue: {
     fontSize: 16,
