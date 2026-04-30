@@ -28,12 +28,14 @@ type CreateRideRequestData = Omit<
 
 /** Returns "YYYY-MM-DD" of the first repeatDay on or after the given date. */
 function firstOccurrence(repeatDays: string[], fromDate: string): string {
-  const DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const base = new Date(fromDate + 'T00:00:00');
   for (let offset = 0; offset < 7; offset++) {
     const d = new Date(base);
     d.setDate(base.getDate() + offset);
-    if (repeatDays.includes(DAY_NAMES[d.getDay()])) {
+    const dayName = DAY_NAMES[d.getDay()];
+    // Case-insensitive comparison to handle different formats
+    if (repeatDays.some(day => day.toLowerCase().startsWith(dayName.toLowerCase().slice(0, 3)))) {
       return d.toISOString().slice(0, 10);
     }
   }
@@ -171,28 +173,39 @@ export async function cancelRideRequest(
   const confirmationRefs = confirmationsSnap.docs.map((d) => d.ref);
 
   await runTransaction(db, async (tx) => {
+    // ── Phase 1: All reads first ──
     const requestRef = doc(db, 'rideRequests', requestId);
     const requestSnap = await tx.get(requestRef);
     if (!requestSnap.exists()) throw new Error(`RideRequest not found: ${requestId}`);
     const rideRequest = requestSnap.data() as RideRequest;
 
+    // Read schedule block if it exists
+    let blockSnap = null;
+    let blockRef = null;
+    if (rideRequest.scheduleBlockId && rideRequest.scheduleBlockId.trim() !== '') {
+      blockRef = doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId);
+      blockSnap = await tx.get(blockRef);
+    }
+
+    // Read all confirmation documents
+    const confirmationSnaps = await Promise.all(
+      confirmationRefs.map(ref => tx.get(ref))
+    );
+
+    // ── Phase 2: All writes ──
     tx.update(requestRef, { status: 'cancelled' });
 
-    // Only try to update schedule block if there's a valid ID
-    if (rideRequest.scheduleBlockId && rideRequest.scheduleBlockId.trim() !== '') {
-      const blockRef = doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId);
-      const blockSnap = await tx.get(blockRef);
-      if (blockSnap.exists() && blockSnap.data()?.status === 'booked') {
-        tx.update(blockRef, { status: 'open' });
-      }
+    // Update schedule block if needed
+    if (blockRef && blockSnap && blockSnap.exists() && blockSnap.data()?.status === 'booked') {
+      tx.update(blockRef, { status: 'open' });
     }
 
-    for (const ref of confirmationRefs) {
-      const snap = await tx.get(ref);
+    // Delete all existing confirmations
+    confirmationSnaps.forEach((snap, i) => {
       if (snap.exists()) {
-        tx.delete(ref);
+        tx.delete(confirmationRefs[i]);
       }
-    }
+    });
   });
 
   if (confirmationRefs.length > 0) {

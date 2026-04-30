@@ -24,6 +24,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  InteractionManager,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -115,6 +116,8 @@ export default function ScheduleScreen() {
     riderRideId?: string;
   } | null>(null);
   const [cancellationStatus, setCancellationStatus] = useState<string>('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [pendingDeletion, setPendingDeletion] = useState<string | null>(null);
 
   // Rider: incoming match requests from drivers and confirmed requests
   const [incomingRequests, setIncomingRequests] = useState<RideRequestWithId[]>([]);
@@ -139,9 +142,9 @@ export default function ScheduleScreen() {
 
   useEffect(() => { loadAll(); }, [user]);
 
-  const loadAll = useCallback(async () => {
+  const loadAll = useCallback(async (isRefresh = false) => {
     if (!user) return;
-    setLoading(true);
+    if (!isRefresh) setLoading(true);
     try {
       const profile = await getUser(user.uid);
       setUserProfile(profile);
@@ -209,7 +212,7 @@ export default function ScheduleScreen() {
     } catch (e) {
       console.error('Error loading schedule:', e);
     } finally {
-      setLoading(false);
+      if (!isRefresh) setLoading(false);
     }
   }, [user]);
 
@@ -269,7 +272,7 @@ export default function ScheduleScreen() {
         estimatedDurationMinutes: durationMinutes,
       });
       closeAddModal();
-      await loadAll();
+      await loadAll(true);
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Could not add ride.');
     } finally {
@@ -293,7 +296,7 @@ export default function ScheduleScreen() {
         repeatEndsAt: null, seriesId: null, expiresAt: null, parentBlockId: null,
       });
       closeAddModal();
-      await loadAll();
+      await loadAll(true);
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Could not save availability.');
     } finally {
@@ -304,18 +307,24 @@ export default function ScheduleScreen() {
   // ── Delete ─────────────────────────────────────────────────────────────────
 
   const handleDeleteRide = (rideId: string) => {
-    Alert.alert('Remove Ride', 'Remove this ride from your schedule?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove', style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteRiderRide(rideId);
-            setRiderRides(prev => prev.filter(r => r.id !== rideId));
-          } catch (e: any) { Alert.alert('Error', e.message); }
-        },
-      },
-    ]);
+    setPendingDeletion(rideId);
+    setShowDeleteConfirm(true);
+  };
+
+  const executeDelete = async () => {
+    if (!pendingDeletion) return;
+    setShowDeleteConfirm(false);
+    setActingOnRide(true);
+    try {
+      await deleteRiderRide(pendingDeletion);
+      await loadAll(true);
+      setSelectedRiderRide(null);
+      setPendingDeletion(null);
+    } catch (e: any) { 
+      Alert.alert('Error', e.message); 
+    } finally {
+      setActingOnRide(false);
+    }
   };
 
   const handleDeleteBlock = (blockId: string) => {
@@ -340,12 +349,15 @@ export default function ScheduleScreen() {
     try {
       await confirmRideRequest(requestId);
       await createNotification(notifyUserId, 'ride_confirmed', requestId, 'Your ride request has been accepted!');
-      setSelectedRide(null);
-      setSelectedIncoming(null);
-      await loadAll();
+      await loadAll(true);
+      // Use InteractionManager to schedule modal close after state updates are processed
+      InteractionManager.runAfterInteractions(() => {
+        setSelectedRide(null);
+        setSelectedIncoming(null);
+        setActingOnRide(false);
+      });
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Could not accept the request.');
-    } finally {
       setActingOnRide(false);
     }
   };
@@ -355,12 +367,15 @@ export default function ScheduleScreen() {
     try {
       await denyRideRequest(requestId);
       await createNotification(notifyUserId, 'ride_denied', requestId, 'Your ride request was declined.');
-      setSelectedRide(null);
-      setSelectedIncoming(null);
-      await loadAll();
+      await loadAll(true);
+      // Use InteractionManager to schedule modal close after state updates are processed
+      InteractionManager.runAfterInteractions(() => {
+        setSelectedRide(null);
+        setSelectedIncoming(null);
+        setActingOnRide(false);
+      });
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Could not deny the request.');
-    } finally {
       setActingOnRide(false);
     }
   };
@@ -404,18 +419,18 @@ export default function ScheduleScreen() {
         setCancellationStatus('Step 3/4: Skipped (no riderRideId)');
       }
       
-      console.log('Step 4: Closing modals and refreshing data...');
+      console.log('Step 4: Refreshing data and closing modals...');
       setCancellationStatus('Step 4/4: Refreshing...');
+      
+      await loadAll(true);
+      console.log('✅ Data refreshed. Closing modals...');
       setSelectedRide(null);
       setSelectedRiderRide(null);
       setPendingCancellation(null);
-      
-      await loadAll();
-      console.log('✅ All complete! Data refreshed.');
       setCancellationStatus('Complete!');
       setTimeout(() => setCancellationStatus(''), 2000);
     } catch (e: any) {
-      console.error('❌ Error during cancellation:', e);
+      console.error('Error during cancellation:', e);
       console.error('Error message:', e.message);
       console.error('Error stack:', e.stack);
       setCancellationStatus('Error: ' + e.message);
@@ -836,10 +851,7 @@ export default function ScheduleScreen() {
                     ) : (
                       <TouchableOpacity
                         style={[styles.denyButton, actingOnRide && styles.actionDisabled]}
-                        onPress={() => {
-                          setSelectedRiderRide(null);
-                          handleDeleteRide(ride.id);
-                        }}
+                        onPress={() => handleDeleteRide(ride.id)}
                         disabled={actingOnRide}
                       >
                         <Text style={styles.actionText}>Remove Ride</Text>
@@ -966,6 +978,46 @@ export default function ScheduleScreen() {
                 }}
               >
                 <Text style={styles.confirmCancelText}>Cancel Ride</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Custom Delete Confirmation Modal ───────────────────────────────────── */}
+      <Modal
+        visible={showDeleteConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowDeleteConfirm(false);
+          setPendingDeletion(null);
+        }}
+      >
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmBox}>
+            <Text style={styles.confirmTitle}>Remove Ride</Text>
+            <Text style={styles.confirmMessage}>
+              Remove this ride from your schedule? This cannot be undone.
+            </Text>
+            <View style={styles.confirmButtons}>
+              <TouchableOpacity
+                style={[styles.confirmButton, styles.confirmKeep]}
+                onPress={() => {
+                  setShowDeleteConfirm(false);
+                  setPendingDeletion(null);
+                }}
+              >
+                <Text style={styles.confirmKeepText}>Keep Ride</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmButton, styles.confirmCancel]}
+                onPress={() => {
+                  console.log('🔴 DELETE RIDE BUTTON IN DIALOG CLICKED!');
+                  executeDelete();
+                }}
+              >
+                <Text style={styles.confirmCancelText}>Remove Ride</Text>
               </TouchableOpacity>
             </View>
           </View>
