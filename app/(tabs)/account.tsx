@@ -586,26 +586,40 @@ export default function AccountScreen() {
 
         {activeRole === 'driver' && (
           <>
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Car Model</Text>
-              <View style={styles.infoBox}>
-                <Text style={styles.infoText}>{carModel || 'Not added yet'}</Text>
+            <View style={styles.carDetailsCard}>
+              <View style={styles.carDetailsHeader}>
+                <Text style={styles.carDetailsTitle}>Car Details</Text>
               </View>
-            </View>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>License Plate</Text>
-              <View style={styles.infoBox}>
-                <Text style={styles.infoText}>{licensePlate || 'Not added yet'}</Text>
+              <View style={styles.carDetailsRow}>
+                <View style={styles.carDetailsField}>
+                  <Text style={styles.sectionLabel}>Car Model</Text>
+                  <View style={[styles.infoBox, styles.carDetailsInfoBox]}>
+                    <Text style={styles.infoText}>{carModel || 'Not added yet'}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.carDetailsField}>
+                  <Text style={styles.sectionLabel}>License Plate</Text>
+                  <View style={[styles.infoBox, styles.carDetailsInfoBox]}>
+                    <Text style={styles.infoText}>{licensePlate || 'Not added yet'}</Text>
+                  </View>
+                </View>
               </View>
-            </View>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Car Photo</Text>
-              <View style={styles.infoBox}>
-                <Text style={styles.infoText}>
-                  {carPhoto ? 'Car photo uploaded' : 'No car photo uploaded yet'}
-                </Text>
+              <View style={styles.carDetailsFieldFull}>
+                <Text style={styles.sectionLabel}>Car Photo</Text>
+                <View style={[styles.infoBox, styles.carDetailsPhotoBox]}>
+                  <View style={styles.carDetailsPhotoLeft}>
+                    <View style={styles.carDetailsPhotoIcon}>
+                      <Ionicons name="car-outline" size={18} color="#666" />
+                    </View>
+                    <Text style={styles.infoText}>
+                      {carPhoto ? 'Car photo uploaded' : 'No car photo uploaded yet'}
+                    </Text>
+                  </View>
+                  <Text style={styles.carDetailsPhotoHint}>Upload coming soon</Text>
+                </View>
               </View>
             </View>
           </>
@@ -1525,6 +1539,68 @@ const styles = StyleSheet.create({
   infoText: {
     fontSize: 16,
     color: '#333',
+  },
+
+  carDetailsCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    padding: 14,
+    marginBottom: 20,
+  },
+  carDetailsHeader: {
+    paddingBottom: 10,
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  carDetailsTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#333',
+  },
+  carDetailsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+  },
+  carDetailsField: {
+    flex: 1,
+  },
+  carDetailsFieldFull: {
+    width: '100%',
+  },
+  carDetailsInfoBox: {
+    paddingVertical: 12,
+  },
+  carDetailsPhotoBox: {
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  carDetailsPhotoLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  carDetailsPhotoIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+  carDetailsPhotoHint: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
   },
   
   saveButton: {
