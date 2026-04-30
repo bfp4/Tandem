@@ -615,68 +615,118 @@ export default function AccountScreen() {
       </View>
 
       <View style={styles.content}>
-      <View style={styles.avatarContainer}>
-          <View style={styles.avatar}>
-            <Ionicons name="person" size={48} color="#999" />
+        <View style={styles.profileHeaderRow}>
+          <View style={styles.avatarContainer}>
+            <View style={styles.avatar}>
+              <Ionicons name="person" size={48} color="#999" />
+            </View>
+            <TouchableOpacity style={styles.editAvatarButton} onPress={handleEditPhotoPress}>
+              <Ionicons name="camera" size={20} color="#007AFF" />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.editAvatarButton} onPress={handleEditPhotoPress}>
-            <Ionicons name="camera" size={20} color="#007AFF" />
-          </TouchableOpacity>
+
+          <View style={styles.profileHeaderText}>
+            <Text style={styles.profileHeaderName}>{name?.trim() ? name.trim() : 'Your profile'}</Text>
+            <Text style={styles.profileHeaderUsername}>
+              {username?.trim() ? `@${username.trim()}` : 'No username set'}
+            </Text>
+            <View style={styles.profileHeaderMetaRow}>
+              <View style={styles.profileHeaderStars}>
+                {Array.from({ length: 5 }).map((_, idx) => (
+                  <Ionicons
+                    key={idx}
+                    name={idx < starRatingValue ? 'star' : 'star-outline'}
+                    size={14}
+                    color={starRating ? '#F5B301' : '#C7C7CC'}
+                    style={idx === 4 ? undefined : { marginRight: 2 }}
+                  />
+                ))}
+              </View>
+              {activeRole?.trim() ? (
+                <View style={styles.roleBadge}>
+                  <Text style={styles.roleBadgeText}>
+                    {activeRole.trim().charAt(0).toUpperCase() + activeRole.trim().slice(1)}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
         </View>
 
         {photoMessage ? (
           <Text style={styles.photoMessage}>{photoMessage}</Text>
         ) : null}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Name</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Enter your name"
-            value={name}
-            onChangeText={setName}
-            placeholderTextColor="#999"
-          />
-        </View>
+        <View style={styles.profileCard}>
+          <Text style={styles.cardTitle}>Profile details</Text>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Bio</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Tell us about yourself"
-            value={bio}
-            onChangeText={setBio}
-            multiline
-            numberOfLines={4}
-            placeholderTextColor="#999"
-          />
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Role</Text>
-          <View style={styles.infoBox}>
-            <Text style={styles.infoText}>{activeRole || 'Not added yet'}</Text>
+          {/*
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Name</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Enter your name"
+              value={name}
+              onChangeText={setName}
+              placeholderTextColor="#999"
+            />
           </View>
-        </View>
+          */}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Star Rating</Text>
-          <View style={styles.infoBox}>
-            {starRating ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                {Array.from({ length: 5 }).map((_, idx) => (
-                  <Ionicons
-                    key={idx}
-                    name={idx < starRatingValue ? 'star' : 'star-outline'}
-                    size={18}
-                    color="#F5B301"
-                    style={idx === 4 ? undefined : { marginRight: 2 }}
-                  />
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.infoText}>Not added yet</Text>
-            )}
+          {/*
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Username</Text>
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>{username || 'Not added yet'}</Text>
+            </View>
+            <Text style={styles.helperText}>
+              To change your username, go to Account Center → Personal Details.
+            </Text>
           </View>
+          */}
+
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Bio</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="Tell us about yourself"
+              value={bio}
+              onChangeText={setBio}
+              multiline
+              numberOfLines={4}
+              placeholderTextColor="#999"
+            />
+          </View>
+
+          {/*
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Role</Text>
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>{activeRole || 'Not added yet'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Star rating</Text>
+            <View style={styles.infoBox}>
+              {starRating ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {Array.from({ length: 5 }).map((_, idx) => (
+                    <Ionicons
+                      key={idx}
+                      name={idx < starRatingValue ? 'star' : 'star-outline'}
+                      size={18}
+                      color="#F5B301"
+                      style={idx === 4 ? undefined : { marginRight: 2 }}
+                    />
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.infoText}>Not added yet</Text>
+              )}
+            </View>
+          </View>
+          */}
         </View>
 
         {activeRole === 'driver' && (
@@ -1595,10 +1645,11 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
+    paddingBottom: 28,
   },
   avatarContainer: {
-    alignItems: 'center',
-    marginVertical: 24,
+    position: 'relative',
+    marginRight: 12,
   },
   photoMessage: {
     marginTop: -4,
@@ -1618,8 +1669,7 @@ const styles = StyleSheet.create({
   editAvatarButton: {
     position: 'absolute',
     bottom: 0,
-    right: '50%',
-    marginRight: -50,
+    right: 0,
     backgroundColor: '#fff',
     width: 36,
     height: 36,
@@ -1631,16 +1681,77 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    transform: [{ translateX: 32 }],
+  },
+  profileHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  profileHeaderText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  profileHeaderName: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#333',
+  },
+  profileHeaderUsername: {
+    marginTop: 2,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  profileHeaderMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 10,
+  },
+  profileHeaderStars: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  roleBadge: {
+    backgroundColor: '#EEF2FF',
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  roleBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4338CA',
   },
   section: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   sectionLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: '#666',
-    marginBottom: 8,
+    marginBottom: 6,
+  },
+  profileCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    padding: 14,
+    marginBottom: 18,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 12,
+  },
+  helperText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#666',
   },
   input: {
     backgroundColor: '#fff',
