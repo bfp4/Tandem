@@ -3,8 +3,8 @@ import { getMatchedUsers, type MatchResult } from '@/services/matchingService';
 import {
   addBlockedAccount,
   addFavorite,
-  getUser,
   hasEitherUserBlocked,
+  getUser,
   isBlockedAccount,
   isFavorited,
   removeBlockedAccount,
@@ -17,14 +17,16 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 
 const DISTANCE_STEPS = [5, 10, 15, 25, 50, 100];
