@@ -60,6 +60,7 @@ export default function AccountScreen() {
   const [accountCenterView, setAccountCenterView] = useState('menu');
   const [temporaryMessage, setTemporaryMessage] = useState('');
   const [accountCenterMessage, setAccountCenterMessage] = useState('');
+  const [savingPersonalDetails, setSavingPersonalDetails] = useState(false);
   const [photoMessage, setPhotoMessage] = useState('');
   const [profileMessage, setProfileMessage] = useState('');
   const [securityCurrentPassword, setSecurityCurrentPassword] = useState('');
@@ -510,7 +511,28 @@ export default function AccountScreen() {
   };
 
   const handleOpenPersonalDetails = () => {
+    setTemporaryMessage('');
     setAccountCenterView('personal');
+  };
+
+  const handleSavePersonalDetails = async () => {
+    if (!user) return;
+    setSavingPersonalDetails(true);
+    try {
+      await updateUser(user.uid, {
+        username: username.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+      } as any);
+      setTemporaryMessage('Personal details saved.');
+      setTimeout(() => setTemporaryMessage(''), 2500);
+      await loadProfile();
+    } catch (error: any) {
+      setTemporaryMessage(error?.message ? String(error.message) : 'Failed to save personal details');
+      setTimeout(() => setTemporaryMessage(''), 3000);
+    } finally {
+      setSavingPersonalDetails(false);
+    }
   };
 
   const handleOpenSecurity = () => {
@@ -820,24 +842,52 @@ export default function AccountScreen() {
 
                 <View style={styles.section}>
                   <Text style={styles.sectionLabel}>Username</Text>
-                  <View style={styles.infoBox}>
-                    <Text style={styles.infoText}>{username || 'Not added yet'}</Text>
-                  </View>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your username"
+                    value={username}
+                    onChangeText={setUsername}
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                  />
                 </View>
 
                 <View style={styles.section}>
                   <Text style={styles.sectionLabel}>Phone</Text>
-                  <View style={styles.infoBox}>
-                    <Text style={styles.infoText}>{phone || 'Not added yet'}</Text>
-                  </View>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your phone"
+                    value={phone}
+                    onChangeText={setPhone}
+                    placeholderTextColor="#999"
+                    keyboardType="phone-pad"
+                  />
                 </View>
 
                 <View style={styles.section}>
                   <Text style={styles.sectionLabel}>Address</Text>
-                  <View style={styles.infoBox}>
-                    <Text style={styles.infoText}>{address || 'Not added yet'}</Text>
-                  </View>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your address"
+                    value={address}
+                    onChangeText={setAddress}
+                    placeholderTextColor="#999"
+                  />
                 </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.saveButton,
+                    savingPersonalDetails ? styles.saveButtonDisabled : null,
+                  ]}
+                  onPress={handleSavePersonalDetails}
+                  disabled={savingPersonalDetails}
+                >
+                  <Ionicons name="save" size={20} color="#fff" />
+                  <Text style={styles.saveButtonText}>
+                    {savingPersonalDetails ? 'Saving...' : 'Save Personal Details'}
+                  </Text>
+                </TouchableOpacity>
 
                 <View style={styles.section}>
                   <Text style={styles.sectionLabel}>User ID</Text>
