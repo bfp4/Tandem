@@ -1358,21 +1358,6 @@ export default function AccountScreen() {
                   <Ionicons name="chevron-forward" size={20} color="#999" />
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handleAppearanceSettingsPress}>
-                  <Text style={styles.modalMenuText}>Appearance</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handlePlaceSettingsMenuPress}>
-                  <Text style={styles.modalMenuText}>Place Settings</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handleGenderPreferencePress}>
-                  <Text style={styles.modalMenuText}>Gender Preference</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-
               </>
             )}
 
