@@ -79,6 +79,7 @@ export default function AccountScreen() {
   const [historyBlocks, setHistoryBlocks] = useState<HistoryBlock[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyMessage, setHistoryMessage] = useState('');
+  const [selectedHistoryBlock, setSelectedHistoryBlock] = useState<HistoryBlock | null>(null);
 
 
 
@@ -998,25 +999,192 @@ export default function AccountScreen() {
                   <Text style={styles.activitySubtle}>No ride history yet.</Text>
                 ) : (
                   historyBlocks.map((h: any, idx: number) => (
-                    <View
+                    <TouchableOpacity
                       key={String(h?.id ?? h?.historyBlockId ?? h?.createdAt?.toMillis?.() ?? idx)}
                       style={styles.activityRow}
+                      onPress={() => {
+                        setSelectedHistoryBlock(h as HistoryBlock);
+                        setAccountCenterView('activity_history_detail');
+                      }}
                     >
                       <View style={styles.activityRowLeft}>
-                        <Text style={styles.activityName}>
-                          {String(h?.date ?? '—')}
-                          {h?.pickupTime ? ` • ${String(h.pickupTime)}` : ''}
-                        </Text>
-                        <Text style={styles.activityRole}>{String(h?.role ?? '—')}</Text>
-                        <Text style={styles.activityRole}>
-                          {`amountPaid: ${String(h?.amountPaid ?? '—')}`}
-                        </Text>
-                        <Text style={styles.activityRole}>
-                          {`otherUserId: ${String(h?.otherUserId ?? '—')}`}
+                        {h?.role === 'rider' ? (
+                          <>
+                            <Text style={styles.activityName}>Ride booked</Text>
+                            <Text style={styles.activityRole}>{`Date: ${String(h?.date ?? '—')}`}</Text>
+                            <Text style={styles.activityRole}>
+                              {`Pickup time: ${String(h?.pickupTime ?? '—')}`}
+                            </Text>
+                            <Text style={styles.activityRole}>
+                              {`Amount paid: $${String(h?.amountPaid ?? '—')}`}
+                            </Text>
+                            <Text style={styles.activityRole}>
+                              {`Driver ID: ${String(h?.otherUserId ?? '—')}`}
+                            </Text>
+                            <Text style={styles.activityRole}>
+                              {`Pickup: (${String(h?.pickupLocation?.latitude ?? '—')}, ${String(
+                                h?.pickupLocation?.longitude ?? '—'
+                              )})`}
+                            </Text>
+                            <Text style={styles.activityRole}>
+                              {`Dropoff: (${String(h?.dropoffLocation?.latitude ?? '—')}, ${String(
+                                h?.dropoffLocation?.longitude ?? '—'
+                              )})`}
+                            </Text>
+                          </>
+                        ) : (
+                          <>
+                            <Text style={styles.activityName}>Ride completed</Text>
+                            <Text style={styles.activityRole}>{`Date: ${String(h?.date ?? '—')}`}</Text>
+                            <Text style={styles.activityRole}>
+                              {`Pickup time: ${String(h?.pickupTime ?? '—')}`}
+                            </Text>
+                            <Text style={styles.activityRole}>
+                              {`Amount earned: $${String(h?.amountPaid ?? '—')}`}
+                            </Text>
+                            <Text style={styles.activityRole}>
+                              {`Rider ID: ${String(h?.otherUserId ?? '—')}`}
+                            </Text>
+                          </>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </>
+            )}
+
+            {accountCenterView === 'activity_history_detail' && (
+              <>
+                <TouchableOpacity
+                  style={styles.backRow}
+                  onPress={() => {
+                    setAccountCenterView('activity_history');
+                    setSelectedHistoryBlock(null);
+                  }}
+                >
+                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
+                  <Text style={styles.backRowText}>Back to Ride History</Text>
+                </TouchableOpacity>
+
+                {!selectedHistoryBlock ? (
+                  <Text style={styles.activitySubtle}>No ride selected.</Text>
+                ) : selectedHistoryBlock.role === 'rider' ? (
+                  <>
+                    <Text style={styles.subSectionTitle}>Ride Purchase Details</Text>
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>Date</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>{String(selectedHistoryBlock.date ?? '—')}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>Pickup time</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>
+                          {String(selectedHistoryBlock.pickupTime ?? '—')}
                         </Text>
                       </View>
                     </View>
-                  ))
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>Amount paid</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>
+                          {`$${String(selectedHistoryBlock.amountPaid ?? '—')}`}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>Driver ID</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>
+                          {String(selectedHistoryBlock.otherUserId ?? '—')}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>rideRequestId</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>
+                          {String(selectedHistoryBlock.rideRequestId ?? '—')}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>Pickup coordinates</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>
+                          {`(${String(selectedHistoryBlock.pickupLocation?.latitude ?? '—')}, ${String(
+                            selectedHistoryBlock.pickupLocation?.longitude ?? '—'
+                          )})`}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>Dropoff coordinates</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>
+                          {`(${String(selectedHistoryBlock.dropoffLocation?.latitude ?? '—')}, ${String(
+                            selectedHistoryBlock.dropoffLocation?.longitude ?? '—'
+                          )})`}
+                        </Text>
+                      </View>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.subSectionTitle}>Driver Ride Details</Text>
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>Date</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>{String(selectedHistoryBlock.date ?? '—')}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>Pickup time</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>
+                          {String(selectedHistoryBlock.pickupTime ?? '—')}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>Amount earned</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>
+                          {`$${String(selectedHistoryBlock.amountPaid ?? '—')}`}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>Rider ID</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>
+                          {String(selectedHistoryBlock.otherUserId ?? '—')}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>rideRequestId</Text>
+                      <View style={styles.infoBox}>
+                        <Text style={styles.infoText}>
+                          {String(selectedHistoryBlock.rideRequestId ?? '—')}
+                        </Text>
+                      </View>
+                    </View>
+                  </>
                 )}
               </>
             )}
