@@ -6,12 +6,14 @@ import {
 import {
   getBlockedAccounts,
   getFavorites,
+  getUserHistoryBlocks,
   removeBlockedAccount,
   removeFavorite,
   type SavedAccountRef,
   updateUser,
   updateUserPreferences,
 } from '@/services/userService';
+import type { HistoryBlock } from '@/types/historyBlock';
 import type { AppearancePreference, GenderPreference } from '@/types/user';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -73,6 +75,11 @@ export default function AccountScreen() {
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityMessage, setActivityMessage] = useState('');
 
+  // App Activity (Ride History)
+  const [historyBlocks, setHistoryBlocks] = useState<HistoryBlock[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyMessage, setHistoryMessage] = useState('');
+
 
 
   useEffect(() => {
@@ -83,6 +90,13 @@ export default function AccountScreen() {
     if (!accountCenterVisible) return;
     if (accountCenterView !== 'activity') return;
     void loadActivity();
+  }, [accountCenterVisible, accountCenterView, user?.uid]);
+
+  useEffect(() => {
+    if (!accountCenterVisible) return;
+    if (accountCenterView !== 'activity_history') return;
+    if (!user?.uid) return;
+    void loadHistory();
   }, [accountCenterVisible, accountCenterView, user?.uid]);
 
   const loadActivity = async () => {
@@ -100,6 +114,39 @@ export default function AccountScreen() {
       setTimeout(() => setActivityMessage(''), 3000);
     } finally {
       setActivityLoading(false);
+    }
+  };
+
+  const loadHistory = async () => {
+    if (!user?.uid) return;
+    setHistoryLoading(true);
+    try {
+      const blocks = await getUserHistoryBlocks(user.uid);
+      const sorted = [...blocks].sort((a: any, b: any) => {
+        const aMillis =
+          a?.createdAt && typeof a.createdAt?.toMillis === 'function'
+            ? a.createdAt.toMillis()
+            : null;
+        const bMillis =
+          b?.createdAt && typeof b.createdAt?.toMillis === 'function'
+            ? b.createdAt.toMillis()
+            : null;
+        if (typeof aMillis === 'number' && typeof bMillis === 'number') {
+          return bMillis - aMillis;
+        }
+
+        const aKey = `${String(a?.date ?? '')} ${String(a?.pickupTime ?? '')}`;
+        const bKey = `${String(b?.date ?? '')} ${String(b?.pickupTime ?? '')}`;
+        if (aKey < bKey) return 1;
+        if (aKey > bKey) return -1;
+        return 0;
+      });
+      setHistoryBlocks(sorted);
+    } catch (error: any) {
+      setHistoryMessage(error?.message ? String(error.message) : 'Failed to load ride history');
+      setTimeout(() => setHistoryMessage(''), 3000);
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -332,8 +379,7 @@ export default function AccountScreen() {
     );
   };
   const handlePurchaseHistoryPress = () => {
-    setTemporaryMessage('Purchase history is not connected yet.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
+    setAccountCenterView('activity_history');
   };
 
   const handleRemoveFavorite = async (targetUid: string) => {
@@ -927,6 +973,48 @@ export default function AccountScreen() {
                       >
                         <Text style={styles.activityActionText}>Remove</Text>
                       </TouchableOpacity>
+                    </View>
+                  ))
+                )}
+              </>
+            )}
+
+            {accountCenterView === 'activity_history' && (
+              <>
+                <TouchableOpacity style={styles.backRow} onPress={handleBackToAppActivity}>
+                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
+                  <Text style={styles.backRowText}>Back to App Activity</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.subSectionTitle}>Ride History</Text>
+
+                {historyMessage ? (
+                  <Text style={styles.activityMessage}>{historyMessage}</Text>
+                ) : null}
+
+                {historyLoading ? (
+                  <Text style={styles.activitySubtle}>Loading...</Text>
+                ) : historyBlocks.length === 0 ? (
+                  <Text style={styles.activitySubtle}>No ride history yet.</Text>
+                ) : (
+                  historyBlocks.map((h: any, idx: number) => (
+                    <View
+                      key={String(h?.id ?? h?.historyBlockId ?? h?.createdAt?.toMillis?.() ?? idx)}
+                      style={styles.activityRow}
+                    >
+                      <View style={styles.activityRowLeft}>
+                        <Text style={styles.activityName}>
+                          {String(h?.date ?? '—')}
+                          {h?.pickupTime ? ` • ${String(h.pickupTime)}` : ''}
+                        </Text>
+                        <Text style={styles.activityRole}>{String(h?.role ?? '—')}</Text>
+                        <Text style={styles.activityRole}>
+                          {`amountPaid: ${String(h?.amountPaid ?? '—')}`}
+                        </Text>
+                        <Text style={styles.activityRole}>
+                          {`otherUserId: ${String(h?.otherUserId ?? '—')}`}
+                        </Text>
+                      </View>
                     </View>
                   ))
                 )}
