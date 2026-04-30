@@ -1,25 +1,31 @@
+import { db } from '@/config/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { getOrCreateConversation } from '@/services/messagingService';
 import {
   cancelReady,
   completeRide,
   confirmPickup,
+  fetchUserConfirmationsOnce,
   markReady,
   subscribeToUserConfirmations,
   type RideConfirmationWithId,
 } from '@/services/rideConfirmationService';
 import { getRideRequestById, type RideRequestWithId } from '@/services/rideRequestService';
+import { getRiderRides } from '@/services/riderRideService';
 import { getUser } from '@/services/userService';
+import type { RiderRide } from '@/types/riderRide';
 import type { User as AppUser } from '@/types/user';
 import { reverseGeocode } from '@/utils/geocoding';
 import { fetchRouteWithSteps } from '@/utils/routing';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
+import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import React, { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -65,6 +71,12 @@ interface EnrichedRide {
   otherUser: AppUser;
   pickupAddress: string;
   dropoffAddress: string;
+  /** True when derived from confirmed rideRequest but missing a confirmation doc */
+  synthetic?: boolean;
+}
+
+interface RiderRideWithId extends RiderRide {
+  id: string;
 }
 
 interface UpcomingMapSectionProps {
@@ -95,9 +107,45 @@ function geoPointToLatLng(gp: any): { latitude: number; longitude: number } | nu
   return { latitude: lat, longitude: lng };
 }
 
+const HOME_RIDES_LOG = '[HomeRides]';
+
+function homeRidesLog(message: string, payload?: unknown) {
+  if (!__DEV__) return;
+  if (payload !== undefined) {
+    console.log(HOME_RIDES_LOG, message, payload);
+  } else {
+    console.log(HOME_RIDES_LOG, message);
+  }
+}
+
+/**
+ * Calendar date (YYYY-MM-DD) + clock time (HH:MM) in the device's local timezone.
+ * Avoids `Date.parse` ambiguity where `YYYY-MM-DD` alone is UTC midnight.
+ */
+function parseLocalRideStart(ymd: string, requestedStart: string | undefined): Date {
+  const parts = (ymd || '').split('-').map((p) => parseInt(p, 10));
+  const y = parts[0];
+  const mo = parts[1];
+  const d = parts[2];
+  if (!y || !mo || !d) return new Date(NaN);
+  const start = requestedStart ?? '00:00';
+  const [hRaw, mRaw] = start.split(':');
+  const h = parseInt(hRaw ?? '0', 10) || 0;
+  const mi = parseInt(mRaw ?? '0', 10) || 0;
+  return new Date(y, mo - 1, d, h, mi, 0, 0);
+}
+
+function isValidTimeHHMM(value: string | undefined): boolean {
+  if (!value) return false;
+  if (!/^\d{2}:\d{2}$/.test(value)) return false;
+  const [h, m] = value.split(':').map((x) => parseInt(x, 10));
+  return h >= 0 && h <= 23 && m >= 0 && m <= 59;
+}
+
 function formatDate(dateStr: string): string {
   if (!dateStr) return '';
-  const d = new Date(dateStr + 'T00:00:00');
+  const d = parseLocalRideStart(dateStr, '00:00');
+  if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
@@ -157,10 +205,6 @@ function estimateETA(minutes: number | null): string {
   return `${Math.round(minutes)} min`;
 }
 
-
-interface RidePricingInfoProps {
-  request: RideRequestWithId;
-}
 
 interface RidePricingInfoProps {
   request: RideRequestWithId;
@@ -250,6 +294,67 @@ function formatTime24to12(hhmm: string): string {
   const hours = h % 12 === 0 ? 12 : h % 12;
   return `${hours}:${String(m).padStart(2, '0')} ${period}`;
 }
+
+function placeholderOtherUser(uid: string): AppUser {
+  return {
+    uid,
+    username: 'unknown',
+    name: 'Unavailable',
+    email: '',
+    phone: '',
+    address: '',
+    bio: '',
+    profilePhoto: '',
+    roles: ['rider'],
+    activeRole: 'rider',
+    starRating: 0,
+    rideCount: 0,
+    bankInfo: null,
+    fcmToken: '',
+    profileComplete: false,
+    missingFields: [],
+    geohash: '',
+    createdAt: Timestamp.now(),
+    carDetails: null,
+  };
+}
+
+function RidesListSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <View style={skeletonStyles.wrap}>
+      {Array.from({ length: count }).map((_, i) => (
+        <View key={i} style={skeletonStyles.card}>
+          <View style={skeletonStyles.shimmerRow}>
+            <View style={[skeletonStyles.pill, skeletonStyles.shimmer]} />
+            <View style={[skeletonStyles.pillSm, skeletonStyles.shimmer]} />
+          </View>
+          <View style={[skeletonStyles.line, skeletonStyles.shimmer]} />
+          <View style={[skeletonStyles.lineShort, skeletonStyles.shimmer]} />
+          <View style={[skeletonStyles.line, skeletonStyles.shimmer]} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const skeletonStyles = StyleSheet.create({
+  wrap: { paddingHorizontal: 16, paddingTop: 12, gap: 12, flex: 1 },
+  card: {
+    backgroundColor: CARD_BG,
+    borderRadius: 16,
+    padding: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  shimmerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  pill: { height: 22, width: '42%', borderRadius: 11, backgroundColor: '#E5E7EB' },
+  pillSm: { height: 22, width: 72, borderRadius: 11, backgroundColor: '#E5E7EB' },
+  line: { height: 14, width: '100%', borderRadius: 7, backgroundColor: '#EEF0F2' },
+  lineShort: { height: 14, width: '55%', borderRadius: 7, backgroundColor: '#EEF0F2' },
+  shimmer: { opacity: 0.85 },
+});
+
 export default function HomeScreenWrapper() {
   return (
     <HomeErrorBoundary>
@@ -259,105 +364,415 @@ export default function HomeScreenWrapper() {
 }
 
 function HomeScreenInner() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
 
   const [tab, setTab] = useState<Tab>('active');
-  const [loading, setLoading] = useState(true);
+  const [listenerKey, setListenerKey] = useState(0);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<
+    'idle' | 'connecting' | 'live' | 'error'
+  >('idle');
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [confirmations, setConfirmations] = useState<RideConfirmationWithId[]>([]);
   const [enrichedRides, setEnrichedRides] = useState<EnrichedRide[]>([]);
+  const [fallbackUpcoming, setFallbackUpcoming] = useState<EnrichedRide[]>([]);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichWarnings, setEnrichWarnings] = useState<string[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const [actingOn, setActingOn] = useState<string | null>(null);
   const [myProfile, setMyProfile] = useState<AppUser | null>(null);
+  const [riderRides, setRiderRides] = useState<RiderRideWithId[]>([]);
   const [activeRoute, setActiveRoute] = useState<RouteData | null>(null);
   const [distanceToDropoff, setDistanceToDropoff] = useState<number | null>(null);
-const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
+  const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
 
   const requestCache = useRef(new Map<string, RideRequestWithId>());
   const userCache = useRef(new Map<string, AppUser>());
   const addressCache = useRef(new Map<string, string>());
   const navigatedToRideRef = useRef<string | null>(null);
+  const enrichGenRef = useRef(0);
+  const inProgressNavTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const confirmationsLengthRef = useRef(0);
   const userLocation = useUserLocation();
-  
+
+  confirmationsLengthRef.current = confirmations.length;
 
   useEffect(() => {
-    if (!user) return;
+    homeRidesLog('auth state', {
+      authLoading,
+      hasUser: Boolean(user),
+      uid: user?.uid ?? null,
+      email: user?.email ?? null,
+      authReady: !authLoading,
+    });
+  }, [authLoading, user]);
+
+  useEffect(() => {
+    if (!user) {
+      setMyProfile(null);
+      return;
+    }
+    let cancelled = false;
     getUser(user.uid)
-      .then(setMyProfile)
-      .catch(() => {});
+      .then((profile) => {
+        if (!cancelled) setMyProfile(profile);
+      })
+      .catch((e) => {
+        homeRidesLog('getUser(my profile) failed', e);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   useEffect(() => {
     if (!user) {
-      setLoading(false);
+      setRiderRides([]);
       return;
     }
+    let cancelled = false;
+    getRiderRides(user.uid)
+      .then((rides) => {
+        if (!cancelled) setRiderRides(rides);
+      })
+      .catch((e) => {
+        homeRidesLog('getRiderRides failed', e);
+        if (!cancelled) setRiderRides([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  //HERE IS THE OLD CODE FOR SUBSCRIPTION DO NOT DELETE IT AGAIN
+  // useEffect(() => {
+  //   if (!user) {
+  //     setSubscriptionStatus('idle');
+  //     setSubscriptionError(null);
+  //     setConfirmations([]);
+  //     return;
+  //   }
+  //   setSubscriptionStatus('connecting');
+  //   setSubscriptionError(null);
+  //   const unsub = subscribeToUserConfirmations(
+  //     user.uid,
+  //     (confs) => {
+  //       homeRidesLog('Firestore snapshot', {
+  //         count: confs.length,
+  //         ids: confs.map((c) => c.id),
+  //       });
+  //       setSubscriptionStatus('live');
+  //       setSubscriptionError(null);
+  //       setConfirmations(confs);
+  //     },
+  //     (err) => {
+  //       homeRidesLog('Firestore listener error', err);
+  //       setSubscriptionStatus('error');
+  //       setSubscriptionError(err.message ?? String(err));
+  //     },
+  //   );
+  //   return unsub;
+  // }, [user, listenerKey]);
+
+  useEffect(() => {
+    if (!user) {
+      setSubscriptionStatus('idle');
+      setSubscriptionError(null);
+      setConfirmations([]);
+      setFallbackUpcoming([]);
+      return;
+    }
+    setSubscriptionStatus('connecting');
+    setSubscriptionError(null);
+
+    homeRidesLog('subscribeToUserConfirmations', { uid: user.uid });
+
     const unsub = subscribeToUserConfirmations(
       user.uid,
       (confs) => {
+        homeRidesLog('Firestore snapshot', {
+          count: confs.length,
+          ids: confs.map((c) => c.id),
+        });
+        setSubscriptionStatus('live');
+        setSubscriptionError(null);
         setConfirmations(confs);
-        setLoading(false);
       },
-      () => setLoading(false),
+      (err) => {
+        homeRidesLog('Firestore listener error', err);
+        setSubscriptionStatus('error');
+        setSubscriptionError(err.message ?? String(err));
+      },
     );
     return unsub;
-  }, [user]);
+  }, [user, listenerKey]);
+
+  const enrichConfirmedRequestsAsUpcoming = useCallback(
+    async (): Promise<void> => {
+      if (!user) return;
+      try {
+        const [riderSnap, driverSnap] = await Promise.all([
+          getDocs(
+            query(
+              collection(db, 'rideRequests'),
+              where('riderId', '==', user.uid),
+              where('status', '==', 'confirmed'),
+            ),
+          ),
+          getDocs(
+            query(
+              collection(db, 'rideRequests'),
+              where('driverId', '==', user.uid),
+              where('status', '==', 'confirmed'),
+            ),
+          ),
+        ]);
+
+        const riderReqs: RideRequestWithId[] = riderSnap.docs.map((d) => ({
+          ...(d.data() as RideRequestWithId),
+          id: d.id,
+        }));
+        const driverReqs: RideRequestWithId[] = driverSnap.docs.map((d) => ({
+          ...(d.data() as RideRequestWithId),
+          id: d.id,
+        }));
+
+        homeRidesLog('fallback upcoming query counts', {
+          riderConfirmed: riderReqs.length,
+          driverConfirmed: driverReqs.length,
+        });
+
+        // Merge and keep only future rides
+        const map = new Map<string, RideRequestWithId>();
+        for (const r of [...riderReqs, ...driverReqs]) {
+          map.set(r.id, r);
+        }
+
+        const now = new Date();
+        const upcomingReqs = [...map.values()].filter((req) => {
+          const start = parseLocalRideStart(req.date, req.requestedStart);
+          if (Number.isNaN(start.getTime())) return false;
+          return start.getTime() > now.getTime();
+        });
+
+        const enriched: EnrichedRide[] = [];
+        for (const req of upcomingReqs) {
+          const pickup = geoPointToLatLng(req.pickupLocation);
+          const dropoff = geoPointToLatLng(req.dropoffLocation);
+          if (!pickup || !dropoff) continue;
+
+          const otherId = req.driverId === user.uid ? req.riderId : req.driverId;
+          let otherUser = userCache.current.get(otherId);
+          if (!otherUser) {
+            try {
+              otherUser = await getUser(otherId);
+              userCache.current.set(otherId, otherUser);
+            } catch {
+              otherUser = placeholderOtherUser(otherId);
+              userCache.current.set(otherId, otherUser);
+            }
+          }
+
+          const pickupKey = `${pickup.latitude},${pickup.longitude}`;
+          let pickupAddr = addressCache.current.get(pickupKey);
+          if (!pickupAddr) {
+            try {
+              pickupAddr = await reverseGeocode(pickup.latitude, pickup.longitude);
+              addressCache.current.set(pickupKey, pickupAddr);
+            } catch {
+              pickupAddr = `${pickup.latitude.toFixed(4)}, ${pickup.longitude.toFixed(4)}`;
+              addressCache.current.set(pickupKey, pickupAddr);
+            }
+          }
+
+          const dropoffKey = `${dropoff.latitude},${dropoff.longitude}`;
+          let dropoffAddr = addressCache.current.get(dropoffKey);
+          if (!dropoffAddr) {
+            try {
+              dropoffAddr = await reverseGeocode(dropoff.latitude, dropoff.longitude);
+              addressCache.current.set(dropoffKey, dropoffAddr);
+            } catch {
+              dropoffAddr = `${dropoff.latitude.toFixed(4)}, ${dropoff.longitude.toFixed(4)}`;
+              addressCache.current.set(dropoffKey, dropoffAddr);
+            }
+          }
+
+          // Synthetic confirmation for display purposes only (no ready/pickup actions)
+          const syntheticConfirmation: RideConfirmationWithId = {
+            id: `synthetic_${req.id}`,
+            rideRequestId: req.id,
+            driverId: req.driverId,
+            riderId: req.riderId,
+            active: false,
+            riderReady: false,
+            driverReady: false,
+            bothConfirmedAt: null,
+            pickupConfirmed: false,
+            pickupConfirmedAt: null,
+            reminderSent: false,
+            status: 'waiting',
+            nextRideDate: req.date,
+            createdAt: Timestamp.now(),
+          };
+
+          enriched.push({
+            confirmation: syntheticConfirmation,
+            request: req,
+            otherUser,
+            pickupAddress: pickupAddr,
+            dropoffAddress: dropoffAddr,
+            synthetic: true,
+          });
+        }
+
+        enriched.sort((a, b) => {
+          const dateA = parseLocalRideStart(a.confirmation.nextRideDate, a.request.requestedStart);
+          const dateB = parseLocalRideStart(b.confirmation.nextRideDate, b.request.requestedStart);
+          return dateA.getTime() - dateB.getTime();
+        });
+
+        setFallbackUpcoming(enriched);
+      } catch (e) {
+        homeRidesLog('fallback upcoming from rideRequests failed', e);
+        setFallbackUpcoming([]);
+      }
+    },
+    [user],
+  );
+
+  useEffect(() => {
+    if (!user) return;
+    // Only use fallback when confirmations aren't coming through.
+    if (subscriptionStatus !== 'live') return;
+    if (confirmations.length > 0) {
+      setFallbackUpcoming([]);
+      return;
+    }
+    enrichConfirmedRequestsAsUpcoming();
+  }, [user, subscriptionStatus, confirmations.length, enrichConfirmedRequestsAsUpcoming]);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      if (cancelled) return;
+      if (confirmationsLengthRef.current > 0) return;
+
+      homeRidesLog('fallback: confirmations still empty → fetchUserConfirmationsOnce');
+
+      try {
+        const rows = await fetchUserConfirmationsOnce(user.uid);
+        if (cancelled || confirmationsLengthRef.current > 0) return;
+        if (rows.length === 0) {
+          homeRidesLog('fallback: one-time fetch also returned zero active confirmations');
+          return;
+        }
+        homeRidesLog('fallback: applying rows from one-time fetch', { count: rows.length });
+        setConfirmations(rows);
+      } catch (e) {
+        homeRidesLog('fallback: fetch failed', e);
+      }
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [user, listenerKey]);
 
   const enrichRides = useCallback(
     async (confs: RideConfirmationWithId[]) => {
       if (!user) return;
+      const gen = ++enrichGenRef.current;
+      const warnings: string[] = [];
 
-      const enriched: EnrichedRide[] = [];
-      await Promise.all(
+      const rows = await Promise.all(
         confs.map(async (conf) => {
           try {
-            if (!conf?.rideRequestId || !conf?.driverId || !conf?.riderId) return;
+            if (!conf?.rideRequestId || !conf?.driverId || !conf?.riderId) {
+              warnings.push(`Skipped ${conf?.id ?? '?'}: missing rideRequestId/driverId/riderId`);
+              return null;
+            }
 
             let req = requestCache.current.get(conf.rideRequestId);
             if (!req) {
               req = (await getRideRequestById(conf.rideRequestId)) ?? undefined;
               if (req) requestCache.current.set(conf.rideRequestId, req);
             }
-            if (!req) return;
+            if (!req) {
+              warnings.push(`No rideRequest ${conf.rideRequestId} for confirmation ${conf.id}`);
+              return null;
+            }
 
             const pickup = geoPointToLatLng(req.pickupLocation);
             const dropoff = geoPointToLatLng(req.dropoffLocation);
-            if (!pickup || !dropoff) return;
+            if (!pickup || !dropoff) {
+              warnings.push(`Missing pickup/dropoff coords (request ${req.id}, confirmation ${conf.id})`);
+              return null;
+            }
 
             const otherId =
               conf.driverId === user.uid ? conf.riderId : conf.driverId;
             let otherUser = userCache.current.get(otherId);
             if (!otherUser) {
-              otherUser = await getUser(otherId);
-              userCache.current.set(otherId, otherUser);
+              try {
+                otherUser = await getUser(otherId);
+                userCache.current.set(otherId, otherUser);
+              } catch (e) {
+                homeRidesLog('getUser(other) failed, placeholder', { otherId, e });
+                otherUser = placeholderOtherUser(otherId);
+                userCache.current.set(otherId, otherUser);
+              }
             }
 
             const pickupKey = `${pickup.latitude},${pickup.longitude}`;
             let pickupAddr = addressCache.current.get(pickupKey);
             if (!pickupAddr) {
-              pickupAddr = await reverseGeocode(pickup.latitude, pickup.longitude);
-              addressCache.current.set(pickupKey, pickupAddr);
+              try {
+                pickupAddr = await reverseGeocode(pickup.latitude, pickup.longitude);
+                addressCache.current.set(pickupKey, pickupAddr);
+              } catch (e) {
+                homeRidesLog('reverseGeocode pickup failed', { pickupKey, e });
+                pickupAddr = `${pickup.latitude.toFixed(4)}, ${pickup.longitude.toFixed(4)}`;
+                addressCache.current.set(pickupKey, pickupAddr);
+              }
             }
 
             const dropoffKey = `${dropoff.latitude},${dropoff.longitude}`;
             let dropoffAddr = addressCache.current.get(dropoffKey);
             if (!dropoffAddr) {
-              dropoffAddr = await reverseGeocode(dropoff.latitude, dropoff.longitude);
-              addressCache.current.set(dropoffKey, dropoffAddr);
+              try {
+                dropoffAddr = await reverseGeocode(dropoff.latitude, dropoff.longitude);
+                addressCache.current.set(dropoffKey, dropoffAddr);
+              } catch (e) {
+                homeRidesLog('reverseGeocode dropoff failed', { dropoffKey, e });
+                dropoffAddr = `${dropoff.latitude.toFixed(4)}, ${dropoff.longitude.toFixed(4)}`;
+                addressCache.current.set(dropoffKey, dropoffAddr);
+              }
             }
 
-            enriched.push({
+            return {
               confirmation: conf,
               request: req,
               otherUser,
               pickupAddress: pickupAddr,
               dropoffAddress: dropoffAddr,
-            });
+            } satisfies EnrichedRide;
           } catch (e) {
-            console.error('Error enriching ride confirmation:', e);
+            const msg = e instanceof Error ? e.message : String(e);
+            warnings.push(`Confirmation ${conf.id}: ${msg}`);
+            homeRidesLog('enrich unexpected error', { confId: conf.id, e });
+            return null;
           }
         }),
       );
 
+      if (gen !== enrichGenRef.current) {
+        homeRidesLog('enrich discarded (stale generation)', { gen, current: enrichGenRef.current });
+        return;
+      }
+
+      const enriched = rows.filter((r): r is EnrichedRide => r != null);
       enriched.sort((a, b) => {
         const statusOrder: Record<string, number> = {
           in_progress: 0,
@@ -371,17 +786,122 @@ const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
       });
 
       setEnrichedRides(enriched);
+      setEnrichWarnings(warnings);
+      homeRidesLog('enrich finished', { enriched: enriched.length, warnings: warnings.length });
     },
     [user],
   );
 
+  // ORIGINAL CODE FOR ENRICH
+  // useEffect(() => {
+  //   if (!user) {
+  //     setEnrichedRides([]);
+  //     setEnriching(false);
+  //     setEnrichWarnings([]);
+  //     return;
+  //   }
+  //   if (confirmations.length === 0) {
+  //     setEnrichedRides([]);
+  //     setEnriching(false);
+  //     setEnrichWarnings([]);
+  //     return;
+  //   }
+  //   let cancelled = false;
+  //   setEnriching(true);
+  //   enrichRides(confirmations).finally(() => {
+  //     if (!cancelled) setEnriching(false);
+  //   });
+  //   return () => {
+  //     cancelled = true;
+  //   };
+  // }, [user, confirmations, enrichRides]);
+
   useEffect(() => {
-    if (confirmations.length === 0) {
+    homeRidesLog('enrich effect', {
+      hasUser: Boolean(user),
+      confirmationsLength: confirmations.length,
+    });
+
+    if (!user) {
       setEnrichedRides([]);
+      setEnriching(false);
+      setEnrichWarnings([]);
       return;
     }
-    enrichRides(confirmations);
-  }, [confirmations, enrichRides]);
+    if (confirmations.length === 0) {
+      setEnrichedRides([]);
+      setEnriching(false);
+      setEnrichWarnings([]);
+      return;
+    }
+
+    let cancelled = false;
+    setEnriching(true);
+    enrichRides(confirmations).finally(() => {
+      if (!cancelled) setEnriching(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, confirmations, enrichRides]);
+
+
+  const handleManualRefresh = useCallback(async () => {
+    if (!user) return;
+    setRefreshing(true);
+    try {
+      requestCache.current.clear();
+      userCache.current.clear();
+      addressCache.current.clear();
+      enrichGenRef.current += 1;
+      homeRidesLog('manual refresh: caches cleared, re-enriching', { confirmations: confirmations.length });
+
+      let confs = confirmations;
+      try {
+        const fetched = await fetchUserConfirmationsOnce(user.uid);
+        if (fetched.length > 0) {
+          confs = fetched;
+          setConfirmations(fetched);
+          homeRidesLog('manual refresh: merged Firestore snapshot', {
+            fetchedCount: fetched.length,
+          });
+        }
+      } catch (e) {
+        homeRidesLog('manual refresh: snapshot fetch skipped', e);
+      }
+
+      try {
+        const rides = await getRiderRides(user.uid);
+        setRiderRides(rides);
+      } catch (e) {
+        homeRidesLog('manual refresh: riderRides fetch skipped', e);
+      }
+
+      await enrichRides(confs);
+      if (confs.length === 0) {
+        await enrichConfirmedRequestsAsUpcoming();
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      homeRidesLog('manual refresh failed', e);
+      Alert.alert('Refresh failed', msg);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [user, confirmations, enrichRides, enrichConfirmedRequestsAsUpcoming]);
+
+  const handleRetrySubscription = useCallback(() => {
+    homeRidesLog('retry subscription');
+    setListenerKey((k) => k + 1);
+  }, []);
+
+  const riderRideById = useMemo(() => {
+    const map = new Map<string, RiderRideWithId>();
+    for (const ride of riderRides) {
+      map.set(ride.id, ride);
+    }
+    return map;
+  }, [riderRides]);
 
   const { upcoming, active } = useMemo(() => {
     const up: EnrichedRide[] = [];
@@ -389,90 +909,155 @@ const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
     const now = new Date();
   
     for (const ride of enrichedRides) {
-      const isActive =
-        ride.confirmation.active === true ||
-        ride.confirmation.status === 'in_progress' ||
-        ride.confirmation.status === 'both_ready';
-  
-      if (isActive) {
+      const st = ride.confirmation.status;
+      const riderRideId = ride.request.riderRideId;
+      const riderRide = riderRideId ? riderRideById.get(riderRideId) : null;
+      // Request time is the authoritative scheduled slot. riderRides is only a fallback.
+      const startTime = isValidTimeHHMM(ride.request.requestedStart)
+        ? ride.request.requestedStart
+        : riderRide?.departureTime;
+      const rideStart = parseLocalRideStart(
+        ride.confirmation.nextRideDate,
+        startTime,
+      );
+
+      // Skip rides with invalid dates
+      if (Number.isNaN(rideStart.getTime())) {
+        continue;
+      }
+
+      const isFuture = rideStart.getTime() > now.getTime();
+
+      // ACTIVE RIDES: in_progress, both_ready
+      if (st === 'in_progress' || st === 'both_ready') {
         act.push(ride);
-      } else {
-        // Build a Date from the ride's date + requestedEnd time
-        const [endH, endM] = (ride.request.requestedEnd ?? '').split(':').map(Number);
-        const rideEnd = new Date(ride.confirmation.nextRideDate + 'T00:00:00');
-        rideEnd.setHours(endH || 0, endM || 0, 0, 0);
-  
-        // Skip rides that have already ended
-        if (rideEnd < now) continue;
-  
-        // Only show rides within the next 24 hours
-        const hoursUntilEnd = (rideEnd.getTime() - now.getTime()) / (1000 * 60 * 60);
-        if (hoursUntilEnd <= 24) {
-          up.push(ride);
-        }
+      }
+      // UPCOMING RIDES: waiting status that are in the future
+      else if (st === 'waiting' && isFuture) {
+        up.push(ride);
       }
     }
+
+    homeRidesLog('filter rides', {
+      enrichedCount: enrichedRides.length,
+      activeCount: act.length,
+      upcomingCount: up.length,
+      riderRidesCount: riderRides.length,
+    });
+    
+    // Sort upcoming by date (soonest first)
+    up.sort((a, b) => {
+      const riderRideA = a.request.riderRideId ? riderRideById.get(a.request.riderRideId) : null;
+      const riderRideB = b.request.riderRideId ? riderRideById.get(b.request.riderRideId) : null;
+      const startA = isValidTimeHHMM(a.request.requestedStart)
+        ? a.request.requestedStart
+        : riderRideA?.departureTime;
+      const startB = isValidTimeHHMM(b.request.requestedStart)
+        ? b.request.requestedStart
+        : riderRideB?.departureTime;
+      const dateA = parseLocalRideStart(
+        a.confirmation.nextRideDate,
+        startA,
+      );
+      const dateB = parseLocalRideStart(
+        b.confirmation.nextRideDate,
+        startB,
+      );
+      return dateA.getTime() - dateB.getTime();
+    });
+    
     return { upcoming: up, active: act };
-  }, [enrichedRides]);
-    
-// Calculate the distance as rider moves towards the dropoff location with eta calculation
-useEffect(() => {
-  if (!userLocation || active.length === 0) {
-    setActiveRoute(null);
-    setDistanceToDropoff(null);
-    setEtaMinutes(null);
-    return;
-  }
+  }, [enrichedRides, riderRideById, riderRides.length]);
 
-  const ride = active[0];
-  const dropoff = geoPointToLatLng(ride.request.dropoffLocation);
-
-  if (!dropoff) {
-    setActiveRoute(null);
-    setDistanceToDropoff(null);
-    setEtaMinutes(null);
-    return;
-  }
-
-  // Fetch route with actual drive time calculation (like Uber)
-  fetchRouteWithSteps(userLocation, dropoff).then((result) => {
-    // Set the route coordinates for map display
-    setActiveRoute({ coordinates: result.coordinates });
-    
-    // Use the actual route distance (not straight-line)
-    setDistanceToDropoff(result.totalDistance);
-    
-    // Use OSRM's calculated drive time (accounts for roads, speed limits, turns, etc.)
-    if (result.totalDuration && result.totalDuration > 0) {
-      setEtaMinutes(result.totalDuration / 60); // Convert seconds to minutes
-    } else {
-      setEtaMinutes(null);
+  const upcomingMerged = useMemo(() => {
+    if (fallbackUpcoming.length === 0) return upcoming;
+    const seen = new Set(upcoming.map((r) => r.confirmation.rideRequestId));
+    const merged = [...upcoming];
+    for (const r of fallbackUpcoming) {
+      if (!seen.has(r.confirmation.rideRequestId)) merged.push(r);
     }
-  }).catch((error) => {
-    console.warn('Failed to fetch route for ETA:', error);
-    // Fallback: use straight-line distance and estimate
-    const distance = getDistanceMeters(userLocation, dropoff);
-    setDistanceToDropoff(distance);
-    const speedMetersPerMin = 35 * 1609 / 60;
-    setEtaMinutes(distance / speedMetersPerMin);
-  });
-}, [userLocation, active]);
+    merged.sort((a, b) => {
+      const dateA = parseLocalRideStart(a.confirmation.nextRideDate, a.request.requestedStart);
+      const dateB = parseLocalRideStart(b.confirmation.nextRideDate, b.request.requestedStart);
+      return dateA.getTime() - dateB.getTime();
+    });
+    return merged;
+  }, [upcoming, fallbackUpcoming]);
+  
+  
+  useEffect(() => {
+    if (!userLocation || active.length === 0) {
+      setActiveRoute(null);
+      setDistanceToDropoff(null);
+      setEtaMinutes(null);
+      return;
+    }
+
+    const ride = active[0];
+    const dropoff = geoPointToLatLng(ride.request.dropoffLocation);
+
+    if (!dropoff) {
+      setActiveRoute(null);
+      setDistanceToDropoff(null);
+      setEtaMinutes(null);
+      return;
+    }
+
+    // Fetch route with actual drive time calculation (like Uber)
+    fetchRouteWithSteps(userLocation, dropoff).then((result) => {
+      // Set the route coordinates for map display
+      setActiveRoute({ coordinates: result.coordinates });
+
+      // Use the actual route distance (not straight-line)
+      setDistanceToDropoff(result.totalDistance);
+
+      // Use OSRM's calculated drive time (accounts for roads, speed limits, turns, etc.)
+      if (result.totalDuration && result.totalDuration > 0) {
+        setEtaMinutes(result.totalDuration / 60); // Convert seconds to minutes
+      } else {
+        setEtaMinutes(null);
+      }
+    }).catch((error) => {
+      console.warn('Failed to fetch route for ETA:', error);
+      // Fallback: use straight-line distance and estimate
+      const distance = getDistanceMeters(userLocation, dropoff);
+      setDistanceToDropoff(distance);
+      const speedMetersPerMin = 35 * 1609 / 60;
+      setEtaMinutes(distance / speedMetersPerMin);
+    });
+  }, [userLocation, active]);
 
 
 
-  // Auto-navigate to ride screen when an in_progress ride is detected
+  // Auto-navigate to ride screen when an in_progress ride is detected (delayed so the home list is visible briefly)
   useEffect(() => {
     const inProgress = active.find((r) => r.confirmation.status === 'in_progress');
+    const clearTimer = () => {
+      if (inProgressNavTimerRef.current) {
+        clearTimeout(inProgressNavTimerRef.current);
+        inProgressNavTimerRef.current = null;
+      }
+    };
+
     if (!inProgress) {
+      clearTimer();
       navigatedToRideRef.current = null;
       return;
     }
     if (navigatedToRideRef.current === inProgress.confirmation.id) return;
-    navigatedToRideRef.current = inProgress.confirmation.id;
-    router.push({
-      pathname: '/ride/[id]',
-      params: { id: inProgress.confirmation.id },
-    });
+
+    clearTimer();
+    const id = inProgress.confirmation.id;
+    homeRidesLog('schedule delayed navigation to ride screen', { confirmationId: id });
+    inProgressNavTimerRef.current = setTimeout(() => {
+      inProgressNavTimerRef.current = null;
+      navigatedToRideRef.current = id;
+      router.push({
+        pathname: '/ride/[id]',
+        params: { id },
+      });
+    }, 2200);
+    return clearTimer;
   }, [active, router]);
 
   const myRole: 'driver' | 'rider' | null = useMemo(() => {
@@ -590,14 +1175,14 @@ useEffect(() => {
     const markers: MarkerData[] = [];
 
     if (userLocation) {
-          markers.unshift({
-            ...userLocation,
-            title: 'You',
-            color: ACCENT, // blue circle distinguishes you from pickup/dropoff
-            isUserLocation: true,
-            
-          });
-        }
+      markers.unshift({
+        ...userLocation,
+        title: 'You',
+        color: ACCENT, // blue circle distinguishes you from pickup/dropoff
+        isUserLocation: true,
+
+      });
+    }
 
     if (pickup) {
       markers.push({ ...pickup, title: 'Pickup', color: GREEN });
@@ -624,7 +1209,18 @@ useEffect(() => {
           />
         </View>
 
-        <ScrollView style={styles.activeCards} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.activeCards}
+          contentContainerStyle={{ paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleManualRefresh}
+              tintColor={ACCENT}
+            />
+          }
+        >
           {active.map((ride) => (
             <View key={ride.confirmation.id} style={styles.card}>
               <View style={styles.cardHeader}>
@@ -640,7 +1236,11 @@ useEffect(() => {
                   <Text style={styles.statusText}>
                     {ride.confirmation.status === 'in_progress'
                       ? 'In Progress'
-                      : 'Waiting for Pickup'}
+                      : ride.confirmation.status === 'both_ready'
+                        ? 'Waiting for Pickup'
+                        : ride.confirmation.active
+                          ? 'Starting soon'
+                          : 'Scheduled'}
                   </Text>
                 </View>
                 <Text style={styles.cardDate}>
@@ -747,7 +1347,7 @@ useEffect(() => {
   };
 
   const renderUpcomingRides = () => {
-    if (upcoming.length === 0) {
+    if (upcomingMerged.length === 0) {
       return (
         <View style={styles.emptyState}>
           <Ionicons name="calendar-outline" size={48} color={TEXT_MUTED} />
@@ -758,11 +1358,11 @@ useEffect(() => {
         </View>
       );
     }
-  
+
     interface ViewScheduleButtonProps {
       onPress: () => void;
     }
-  
+
     function ViewScheduleButton({ onPress }: ViewScheduleButtonProps) {
       return (
         <TouchableOpacity style={scheduleStyles.button} onPress={onPress}>
@@ -772,7 +1372,7 @@ useEffect(() => {
         </TouchableOpacity>
       );
     }
-  
+
     const scheduleStyles = StyleSheet.create({
       button: {
         flexDirection: 'row',
@@ -791,7 +1391,7 @@ useEffect(() => {
         color: '#007AFF',
       },
     });
-  
+
     return (
       <>
         <ViewScheduleButton
@@ -801,28 +1401,36 @@ useEffect(() => {
           style={styles.upcomingList}
           contentContainerStyle={styles.upcomingContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleManualRefresh}
+              tintColor={ACCENT}
+            />
+          }
         >
-          <UpcomingMapSection upcoming={upcoming} userLocation={userLocation} />
-          {upcoming.map((ride) => {
+          <UpcomingMapSection upcoming={upcomingMerged} userLocation={userLocation} />
+          {upcomingMerged.map((ride) => {
             const isDriver = ride.confirmation.driverId === user?.uid;
             const isRider = ride.confirmation.riderId === user?.uid;
-  
+
             const driverReady = ride.confirmation.driverReady ?? false;
             const riderReady = ride.confirmation.riderReady ?? false;
-  
+
             // For the current user, are THEY ready?
             const iAmReady = isDriver ? driverReady : riderReady;
             // Is the OTHER party ready?
             const otherReady = isDriver ? riderReady : driverReady;
-  
+
             // Only show I'm Ready button within 30 minutes of pickup
             const now = new Date();
-            const [startH, startM] = (ride.request.requestedStart ?? '').split(':').map(Number);
-            const rideStart = new Date(ride.confirmation.nextRideDate + 'T00:00:00');
-            rideStart.setHours(startH || 0, startM || 0, 0, 0);
+            const rideStart = parseLocalRideStart(
+              ride.confirmation.nextRideDate,
+              ride.request.requestedStart,
+            );
             const minutesUntilStart = (rideStart.getTime() - now.getTime()) / (1000 * 60);
             const within30Min = minutesUntilStart <= 30 && minutesUntilStart > -60;
-  
+
             return (
               <View key={ride.confirmation.id} style={styles.card}>
                 <View style={styles.cardHeader}>
@@ -831,10 +1439,12 @@ useEffect(() => {
                   </Text>
                   <View style={styles.statusBadge}>
                     <Ionicons name="time-outline" size={14} color={TEXT_MUTED} />
-                    <Text style={styles.statusText}>Scheduled</Text>
+                    <Text style={styles.statusText}>
+                      {ride.synthetic ? 'Scheduled (syncing…)': 'Scheduled'}
+                    </Text>
                   </View>
                 </View>
-  
+
                 <View style={styles.cardTime}>
                   <Ionicons name="time-outline" size={16} color={TEXT_SECONDARY} />
                   <Text style={styles.cardTimeText}>
@@ -842,7 +1452,7 @@ useEffect(() => {
                     {formatTime24to12(ride.request.requestedEnd)}
                   </Text>
                 </View>
-  
+
                 <View style={styles.locationBlock}>
                   <View style={styles.locationRow}>
                     <View style={[styles.locationDot, { backgroundColor: GREEN }]} />
@@ -858,7 +1468,7 @@ useEffect(() => {
                     </Text>
                   </View>
                 </View>
-  
+
                 <TouchableOpacity
                   style={styles.profileRow}
                   onPress={() => handleViewProfile(ride.otherUser)}
@@ -867,11 +1477,11 @@ useEffect(() => {
                     request={ride.request}
                     rideDistanceMeters={
                       geoPointToLatLng(ride.request.pickupLocation) &&
-                      geoPointToLatLng(ride.request.dropoffLocation)
+                        geoPointToLatLng(ride.request.dropoffLocation)
                         ? getDistanceMeters(
-                            geoPointToLatLng(ride.request.pickupLocation)!,
-                            geoPointToLatLng(ride.request.dropoffLocation)!
-                          )
+                          geoPointToLatLng(ride.request.pickupLocation)!,
+                          geoPointToLatLng(ride.request.dropoffLocation)!
+                        )
                         : null
                     }
                   />
@@ -889,10 +1499,10 @@ useEffect(() => {
                   </View>
                   <Ionicons name="chevron-forward" size={18} color={TEXT_MUTED} />
                 </TouchableOpacity>
-  
+
                 <View style={styles.cardActions}>
                   {/* DRIVER: auto-ready, show static waiting badge */}
-                  {isDriver && within30Min && (
+                  {isDriver && within30Min && !ride.synthetic && (
                     <View style={styles.waitingBadge}>
                       <Ionicons name="checkmark-circle" size={16} color={GREEN} />
                       <Text style={[styles.waitingText, { color: GREEN }]}>
@@ -900,9 +1510,9 @@ useEffect(() => {
                       </Text>
                     </View>
                   )}
-  
+
                   {/* RIDER: manual I'm Ready, with cancel, only within 30 min */}
-                  {isRider && within30Min && !iAmReady && (
+                  {isRider && within30Min && !iAmReady && !ride.synthetic && (
                     <TouchableOpacity
                       style={[
                         styles.primaryButton,
@@ -922,9 +1532,9 @@ useEffect(() => {
                       )}
                     </TouchableOpacity>
                   )}
-  
+
                   {/* RIDER: already ready — show static waiting + cancel option */}
-                  {isRider && within30Min && iAmReady && (
+                  {isRider && within30Min && iAmReady && !ride.synthetic && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                       <View style={[styles.waitingBadge, { flex: 1 }]}>
                         <Ionicons name="checkmark-circle" size={16} color={GREEN} />
@@ -945,7 +1555,7 @@ useEffect(() => {
                       </TouchableOpacity>
                     </View>
                   )}
-  
+
                   <TouchableOpacity
                     style={styles.messageChip}
                     onPress={() => handleMessage(ride.otherUser.uid)}
@@ -962,10 +1572,42 @@ useEffect(() => {
     );
   };
 
-  if (loading) {
+  const showBlockingSkeleton =
+    Boolean(user) && subscriptionStatus === 'connecting';
+  const showEnrichSkeleton =
+    Boolean(user) &&
+    subscriptionStatus === 'live' &&
+    enriching &&
+    confirmations.length > 0 &&
+    enrichedRides.length === 0;
+
+  if (authLoading) {
+    return (
+      <View style={styles.centered} accessibilityLabel="Signing you in">
+        <ActivityIndicator size="large" color={ACCENT} />
+        <Text style={{ marginTop: 12, color: TEXT_SECONDARY, fontSize: 15 }}>
+          Signing you in…
+        </Text>
+      </View>
+    );
+  }
+
+  if (!user) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={ACCENT} />
+        <Ionicons name="log-in-outline" size={48} color={TEXT_MUTED} />
+        <Text style={styles.emptyTitle}>Sign in required</Text>
+        <Text style={[styles.emptySubtitle, { textAlign: 'center', paddingHorizontal: 32 }]}>
+          Log in to view and manage your rides.
+        </Text>
+        <TouchableOpacity
+          style={[styles.primaryButton, { marginTop: 24, paddingHorizontal: 28 }]}
+          onPress={() => router.push('/login')}
+          accessibilityRole="button"
+          accessibilityLabel="Go to login"
+        >
+          <Text style={styles.primaryButtonText}>Go to login</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -973,9 +1615,51 @@ useEffect(() => {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Rides</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.headerTitle}>My Rides</Text>
+          <TouchableOpacity
+            onPress={handleManualRefresh}
+            disabled={!user || refreshing || enriching}
+            style={styles.headerRefresh}
+            accessibilityLabel="Refresh rides"
+          >
+            {refreshing ? (
+              <ActivityIndicator size="small" color={ACCENT} />
+            ) : (
+              <Ionicons name="refresh" size={22} color={ACCENT} />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
+      {subscriptionError ? (
+        <View style={styles.errorBanner}>
+          <Ionicons name="cloud-offline-outline" size={22} color="#B91C1C" />
+          <View style={styles.errorBannerBody}>
+            <Text style={styles.errorBannerTitle}>Could not sync rides</Text>
+            <Text style={styles.errorBannerText} numberOfLines={5}>
+              {subscriptionError}
+            </Text>
+          </View>
+          <TouchableOpacity style={styles.errorBannerRetry} onPress={handleRetrySubscription}>
+            <Text style={styles.errorBannerRetryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {enrichWarnings.length > 0 ? (
+        <View style={styles.warnBanner}>
+          <Ionicons name="warning-outline" size={18} color="#92400E" />
+          <Text style={styles.warnBannerText} numberOfLines={3}>
+            {enrichWarnings.length} confirmation(s) skipped or partially loaded. Pull down to retry.
+          </Text>
+        </View>
+      ) : null}
+
+      {showBlockingSkeleton ? (
+        <RidesListSkeleton count={4} />
+      ) : (
+        <>
       <View style={styles.toggleBar}>
         <TouchableOpacity
           style={[styles.toggleTab, tab === 'active' && styles.toggleTabActive]}
@@ -1013,7 +1697,13 @@ useEffect(() => {
         </TouchableOpacity>
       </View>
 
-      {tab === 'active' ? renderActiveRides() : renderUpcomingRides()}
+      {showEnrichSkeleton ? (
+            <RidesListSkeleton count={3} />
+          ) : (
+            tab === 'active' ? renderActiveRides() : renderUpcomingRides()
+          )}
+        </>
+      )}
     </View>
   );
 }
@@ -1024,14 +1714,14 @@ function useUserLocation() {
     latitude: number;
     longitude: number;
   } | null>(null);
- 
+
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
- 
+
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
- 
+
       // Get an immediate fix first…
       const initial = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
@@ -1040,7 +1730,7 @@ function useUserLocation() {
         latitude: initial.coords.latitude,
         longitude: initial.coords.longitude,
       });
- 
+
       // …then keep watching for updates.
       sub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, distanceInterval: 20 },
@@ -1051,12 +1741,12 @@ function useUserLocation() {
           }),
       );
     })();
- 
+
     return () => {
       sub?.remove();
     };
   }, []);
- 
+
   return userLocation;
 }
 
@@ -1147,10 +1837,73 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   headerTitle: {
     fontSize: 28,
     fontWeight: 'bold',
     color: TEXT_PRIMARY,
+    flex: 1,
+  },
+  headerRefresh: {
+    padding: 8,
+    marginRight: -4,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#FEF2F2',
+    borderBottomWidth: 1,
+    borderBottomColor: '#FECACA',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  errorBannerBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  errorBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#991B1B',
+    marginBottom: 4,
+  },
+  errorBannerText: {
+    fontSize: 13,
+    color: '#7F1D1D',
+    lineHeight: 18,
+  },
+  errorBannerRetry: {
+    backgroundColor: '#B91C1C',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignSelf: 'center',
+  },
+  errorBannerRetryText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  warnBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFFBEB',
+    borderBottomWidth: 1,
+    borderBottomColor: '#FDE68A',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  warnBannerText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#92400E',
+    lineHeight: 18,
   },
 
   toggleBar: {
