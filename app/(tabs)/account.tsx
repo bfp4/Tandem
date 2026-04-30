@@ -16,12 +16,14 @@ import {
 import type { HistoryBlock } from '@/types/historyBlock';
 import type { AppearancePreference, GenderPreference } from '@/types/user';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import React, { useEffect, useState } from 'react';
 import {
-  Alert,
   Modal,
   ScrollView,
   StyleSheet,
@@ -30,7 +32,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { auth, db } from '../../config/firebase';
+import { auth, db, storage } from '../../config/firebase';
 
 export default function AccountScreen() {
   const router = useRouter();
@@ -51,11 +53,15 @@ export default function AccountScreen() {
   const [carModel, setCarModel] = useState('');
   const [licensePlate, setLicensePlate] = useState('');
   const [carPhoto, setCarPhoto] = useState(''); 
+  const [carPhotoPreview, setCarPhotoPreview] = useState('');
+  const [carPhotoMessage, setCarPhotoMessage] = useState('');
+  const [carPhotoUploading, setCarPhotoUploading] = useState(false);
   const [accountCenterVisible, setAccountCenterVisible] = useState(false);
   const [accountCenterView, setAccountCenterView] = useState('menu');
   const [temporaryMessage, setTemporaryMessage] = useState('');
   const [accountCenterMessage, setAccountCenterMessage] = useState('');
   const [photoMessage, setPhotoMessage] = useState('');
+  const [profileMessage, setProfileMessage] = useState('');
   const [securityCurrentPassword, setSecurityCurrentPassword] = useState('');
   const [securityNewPassword, setSecurityNewPassword] = useState('');
   const [securityNewEmail, setSecurityNewEmail] = useState('');
@@ -202,10 +208,12 @@ export default function AccountScreen() {
           setCarModel(data.carDetails.model || '');
           setLicensePlate(data.carDetails.licensePlate || '');
           setCarPhoto(data.carDetails.photo || '');
+          setCarPhotoPreview(data.carDetails.photo || '');
         } else {
           setCarModel('');
           setLicensePlate('');
           setCarPhoto('');
+          setCarPhotoPreview('');
         }
 
         // Preferences
@@ -243,11 +251,18 @@ export default function AccountScreen() {
       await setDoc(docRef, { 
         name: name.trim(),
         bio: bio.trim(),
+        carDetails: {
+          model: carModel,
+          licensePlate,
+          photo: carPhoto,
+        },
         updatedAt: new Date().toISOString(),
       }, { merge: true });
-      Alert.alert('Success', 'Profile saved!');
+      setProfileMessage('Profile saved.');
+      setTimeout(() => setProfileMessage(''), 2500);
     } catch (error: any) {
-      Alert.alert('Error', error.message);
+      setProfileMessage(error?.message ? String(error.message) : 'Failed to save profile.');
+      setTimeout(() => setProfileMessage(''), 3000);
     } finally {
       setLoading(false);
     }
@@ -262,39 +277,41 @@ export default function AccountScreen() {
       await signOut(auth);
       router.replace('../login' as any);
     } catch (error: any) {
-      Alert.alert('Error', error.message);
+      setProfileMessage(error?.message ? String(error.message) : 'Failed to sign out.');
+      setTimeout(() => setProfileMessage(''), 3000);
     }
   };
 
   const handleNotificationsPress = () => {
-    Alert.alert('Notifications', 'Notification settings coming soon.');
+    setTemporaryMessage('Notification settings coming soon.');
+    setTimeout(() => setTemporaryMessage(''), 2500);
   };
 
   const handleAppearancePress = () => {
-    Alert.alert('Appearance', 'Theme settings coming soon.');
+    setTemporaryMessage('Theme settings coming soon.');
+    setTimeout(() => setTemporaryMessage(''), 2500);
   };
 
   const handlePlaceSettingsPress = () => {
-    Alert.alert('Place Settings', 'Place settings coming soon.');
+    setTemporaryMessage('Place settings coming soon.');
+    setTimeout(() => setTemporaryMessage(''), 2500);
   };
 
   const handlePrivacyPress = () => {
-    Alert.alert('Privacy', 'Privacy settings coming soon.');
+    setTemporaryMessage('Privacy settings coming soon.');
+    setTimeout(() => setTemporaryMessage(''), 2500);
   };
 
   const handleAccountHelpPress = () => {
-    Alert.alert('Account Help', 'Account support options coming soon.');
+    setTemporaryMessage('Account support options coming soon.');
+    setTimeout(() => setTemporaryMessage(''), 2500);
   };
 
   const handleCancelAccountPress = () => {
-    Alert.alert(
-      'Cancel Account',
+    setTemporaryMessage(
       'Account cancellation is not connected yet. This would be a permanent action.',
-      [
-        { text: 'Go Back', style: 'cancel' },
-        { text: 'Understood', style: 'destructive' },
-      ]
     );
+    setTimeout(() => setTemporaryMessage(''), 3000);
   };
   const handleChangePasswordPress = () => {
     setAccountCenterMessage('');
@@ -316,11 +333,11 @@ export default function AccountScreen() {
     const newPassword = securityNewPassword;
 
     if (!currentPassword.trim()) {
-      Alert.alert('Current password required', 'Please enter your current password.');
+      setAccountCenterMessage('Current password required.');
       return;
     }
     if (newPassword.length < 6) {
-      Alert.alert('Password too short', 'New password must be at least 6 characters.');
+      setAccountCenterMessage('Password too short (min 6 characters).');
       return;
     }
 
@@ -332,7 +349,7 @@ export default function AccountScreen() {
       setSecurityNewPassword('');
       setAccountCenterView('security');
     } catch (error: any) {
-      Alert.alert('Error', error?.message ?? 'Failed to change password');
+      setAccountCenterMessage(error?.message ? String(error.message) : 'Failed to change password');
     } finally {
       setSecuritySaving(false);
     }
@@ -344,11 +361,11 @@ export default function AccountScreen() {
     const newEmail = securityNewEmail.trim();
 
     if (!currentPassword.trim()) {
-      Alert.alert('Current password required', 'Please enter your current password.');
+      setAccountCenterMessage('Current password required.');
       return;
     }
     if (!newEmail || !newEmail.includes('@')) {
-      Alert.alert('Invalid email', 'Please enter a valid email address.');
+      setAccountCenterMessage('Invalid email address.');
       return;
     }
 
@@ -362,7 +379,7 @@ export default function AccountScreen() {
       setSecurityNewEmail('');
       setAccountCenterView('security');
     } catch (error: any) {
-      Alert.alert('Error', error?.message ?? 'Failed to change email');
+      setAccountCenterMessage(error?.message ? String(error.message) : 'Failed to change email');
     } finally {
       setSecuritySaving(false);
     }
@@ -379,6 +396,60 @@ export default function AccountScreen() {
   const handleEditPhotoPress = () => {
     setPhotoMessage('Profile photo upload is not connected yet.'  
     );
+  };
+
+  const handlePickCarPhoto = async () => {
+    try {
+      setCarPhotoMessage('');
+      if (!user?.uid) return;
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setCarPhotoMessage('Photo library permission is required to select a car photo.');
+        setTimeout(() => setCarPhotoMessage(''), 3000);
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.85,
+      });
+
+      if (result.canceled) return;
+      const uri = result.assets?.[0]?.uri;
+      if (!uri) {
+        setCarPhotoMessage('Could not read selected image.');
+        setTimeout(() => setCarPhotoMessage(''), 3000);
+        return;
+      }
+
+      setCarPhotoPreview(uri);
+      setCarPhotoUploading(true);
+      setCarPhotoMessage('Uploading car photo...');
+
+      const carPhotoRef = ref(storage, `users/${user.uid}/car-photo.jpg`);
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      await uploadBytes(carPhotoRef, blob);
+      const downloadURL = await getDownloadURL(carPhotoRef);
+
+      setCarPhoto(downloadURL);
+      setCarPhotoPreview(downloadURL);
+      setCarPhotoMessage('Car photo uploaded. Tap “Save Profile” to keep it on your account.');
+      setTimeout(() => setCarPhotoMessage(''), 3000);
+    } catch (error: any) {
+      const raw = error?.message ? String(error.message) : '';
+      const isPermission =
+        raw.toLowerCase().includes('permission') ||
+        raw.toLowerCase().includes('unauthorized') ||
+        raw.toLowerCase().includes('storage/unauthorized');
+      setCarPhotoMessage(
+        isPermission ? 'Car photo could not be uploaded (Storage permissions).' : (raw || 'Car photo could not be uploaded.'),
+      );
+      setTimeout(() => setCarPhotoMessage(''), 3000);
+    } finally {
+      setCarPhotoUploading(false);
+    }
   };
   const handlePurchaseHistoryPress = () => {
     setAccountCenterView('activity_history');
@@ -484,7 +555,8 @@ export default function AccountScreen() {
       setTimeout(() => setTemporaryMessage(''), 2500);
       await loadProfile();
     } catch (error: any) {
-      Alert.alert('Error', error?.message ?? 'Failed to save preferences');
+      setTemporaryMessage(error?.message ? String(error.message) : 'Failed to save preferences');
+      setTimeout(() => setTemporaryMessage(''), 3000);
     } finally {
       setSavingPreferences(false);
     }
@@ -507,7 +579,8 @@ export default function AccountScreen() {
       setTimeout(() => setTemporaryMessage(''), 2500);
       await loadProfile();
     } catch (error: any) {
-      Alert.alert('Error', error?.message ?? 'Failed to save payment / financial');
+      setTemporaryMessage(error?.message ? String(error.message) : 'Failed to save payment / financial');
+      setTimeout(() => setTemporaryMessage(''), 3000);
     } finally {
       setSavingPayment(false);
     }
@@ -609,17 +682,32 @@ export default function AccountScreen() {
 
               <View style={styles.carDetailsFieldFull}>
                 <Text style={styles.sectionLabel}>Car Photo</Text>
-                <View style={[styles.infoBox, styles.carDetailsPhotoBox]}>
+                <TouchableOpacity
+                  style={[styles.infoBox, styles.carDetailsPhotoBox]}
+                  onPress={handlePickCarPhoto}
+                  activeOpacity={0.8}
+                >
                   <View style={styles.carDetailsPhotoLeft}>
                     <View style={styles.carDetailsPhotoIcon}>
                       <Ionicons name="car-outline" size={18} color="#666" />
                     </View>
                     <Text style={styles.infoText}>
-                      {carPhoto ? 'Car photo uploaded' : 'No car photo uploaded yet'}
+                      {carPhoto ? 'Car photo selected' : 'No car photo selected yet'}
                     </Text>
                   </View>
-                  <Text style={styles.carDetailsPhotoHint}>Upload coming soon</Text>
-                </View>
+                  {carPhotoPreview ? (
+                    <Image
+                      source={{ uri: carPhotoPreview }}
+                      style={styles.carDetailsPhotoPreview}
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <Text style={styles.carDetailsPhotoHint}>Select photo</Text>
+                  )}
+                </TouchableOpacity>
+                {carPhotoMessage ? (
+                  <Text style={styles.carPhotoMessage}>{carPhotoMessage}</Text>
+                ) : null}
               </View>
             </View>
           </>
@@ -633,13 +721,16 @@ export default function AccountScreen() {
         <TouchableOpacity 
           style={styles.saveButton} 
           onPress={handleSaveProfile}
-          disabled={loading}
+          disabled={loading || carPhotoUploading}
         >
           <Ionicons name="save" size={20} color="#fff" />
           <Text style={styles.saveButtonText}>
           {loading ? 'Saving...' : 'Save Profile'}
           </Text>
         </TouchableOpacity>
+        {profileMessage ? (
+          <Text style={styles.profileMessage}>{profileMessage}</Text>
+        ) : null}
 
       </View>
 
@@ -1601,6 +1692,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#666',
+  },
+  carDetailsPhotoPreview: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    backgroundColor: '#f5f5f5',
+  },
+  carPhotoMessage: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#666',
+  },
+  profileMessage: {
+    marginTop: -10,
+    marginBottom: 18,
+    fontSize: 13,
+    color: '#666',
+    textAlign: 'center',
   },
   
   saveButton: {
