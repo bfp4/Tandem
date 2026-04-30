@@ -68,6 +68,25 @@ export async function deleteRiderRide(rideId: string): Promise<void> {
 
     console.log('🟡 Starting transaction...');
     await runTransaction(db, async (tx) => {
+      // ── Phase 1: All reads first ──
+      const blockSnapsToUpdate: Array<{ ref: any; snap: any; blockId: string }> = [];
+      
+      for (const requestDoc of requestsToCancel) {
+        const rideRequest = requestDoc.data() as RideRequest;
+        if (rideRequest.scheduleBlockId) {
+          const blockRef = doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId);
+          const blockSnap = await tx.get(blockRef);
+          if (blockSnap.exists() && blockSnap.data()?.status === 'booked') {
+            blockSnapsToUpdate.push({ 
+              ref: blockRef, 
+              snap: blockSnap, 
+              blockId: rideRequest.scheduleBlockId 
+            });
+          }
+        }
+      }
+
+      // ── Phase 2: All writes ──
       console.log('🟡 Deleting riderRide:', rideId);
       tx.delete(doc(db, 'riderRides', rideId));
 
@@ -76,16 +95,11 @@ export async function deleteRiderRide(rideId: string): Promise<void> {
         tx.update(doc(db, 'rideRequests', requestDoc.id), {
           status: 'cancelled',
         });
-        
-        const rideRequest = requestDoc.data() as RideRequest;
-        if (rideRequest.scheduleBlockId) {
-          const blockRef = doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId);
-          const blockSnap = await tx.get(blockRef);
-          if (blockSnap.exists() && blockSnap.data()?.status === 'booked') {
-            console.log('🟡 Opening schedule block:', rideRequest.scheduleBlockId);
-            tx.update(blockRef, { status: 'open' });
-          }
-        }
+      }
+
+      for (const { ref, blockId } of blockSnapsToUpdate) {
+        console.log('🟡 Opening schedule block:', blockId);
+        tx.update(ref, { status: 'open' });
       }
 
       for (const confirmationId of confirmationsToDelete) {

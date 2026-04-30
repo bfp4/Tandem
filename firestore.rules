@@ -74,6 +74,10 @@ service cloud.firestore {
       allow update: if request.auth != null
         && (request.auth.uid == resource.data.driverId
             || request.auth.uid == resource.data.riderId);
+      // Either party can delete when cancelling a ride
+      allow delete: if request.auth != null
+        && (request.auth.uid == resource.data.driverId
+            || request.auth.uid == resource.data.riderId);
     }
 
     match /ratings/{ratingId} {

@@ -211,14 +211,16 @@ async function findDriversForRider(
     confirmedByDriver.set(req.driverId, list);
   }
 
-  // 5. Every driver with at least one open block is a candidate.
-  //    Compatible rides (may be empty) determine the sort score.
+  // 5. Only drivers with at least one matching ride are candidates.
   const candidates: { driverId: string; matchingRides: RideMatchInfo[] }[] = [];
 
   for (const [driverId, blocks] of blocksByDriver) {
     const bookedRides = confirmedByDriver.get(driverId) ?? [];
     const matchingRides = computeMatchingRides(riderRides, blocks, bookedRides);
-    candidates.push({ driverId, matchingRides });
+    // Only include drivers who have at least one overlapping time window
+    if (matchingRides.length > 0) {
+      candidates.push({ driverId, matchingRides });
+    }
   }
 
   // 6. Fetch driver profiles and build results (drivers with more compatible rides rank higher).
@@ -272,13 +274,15 @@ async function findRidersForDriver(
     ridesByRider.set(ride.userId, list);
   }
 
-  // 5. Every rider with at least one active ride is a candidate.
-  //    Compatible rides (may be empty) determine the sort score.
+  // 5. Only riders with at least one matching ride are candidates.
   const candidates: { riderId: string; matchingRides: RideMatchInfo[] }[] = [];
 
   for (const [riderId, rides] of ridesByRider) {
     const matchingRides = computeMatchingRides(rides, driverBlocks, driverConfirmed);
-    candidates.push({ riderId, matchingRides });
+    // Only include riders who have at least one overlapping time window
+    if (matchingRides.length > 0) {
+      candidates.push({ riderId, matchingRides });
+    }
   }
 
   // 6. Fetch rider profiles in parallel and build results
