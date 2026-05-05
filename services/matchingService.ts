@@ -3,9 +3,9 @@ import type { RideRequest } from '@/types/rideRequest';
 import type { RiderRide } from '@/types/riderRide';
 import type { ScheduleBlock } from '@/types/scheduleBlock';
 import type { User } from '@/types/user';
-import { distanceBetween } from 'geofire-common';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { getAllDrivers, getAllRiders, getUser } from './userService';
+import { distanceBetween } from 'geofire-common';
+import { getUser } from './userService';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -386,9 +386,9 @@ async function buildResults(
 
 /**
  * Composite match score (0–1):
- *   40% — star rating
+ *   30% — star rating
  *   40% — number of matching rides (capped at 5 for normalization)
- *   20% — proximity (inverse distance)
+ *   30% — proximity (inverse distance)
  */
 function computeScore(
   user: User,
@@ -396,8 +396,8 @@ function computeScore(
   distanceMiles: number,
   maxDistanceMiles: number,
 ): number {
-  const ratingScore = (user.starRating / 5.0) * 0.4;
+  const ratingScore = (user.starRating / 5.0) * 0.3;
   const ridesScore = (Math.min(matchingRidesCount, 5) / 5) * 0.4;
-  const distanceScore = (1 - Math.min(distanceMiles, maxDistanceMiles) / maxDistanceMiles) * 0.2;
+  const distanceScore = (1 - Math.min(distanceMiles, maxDistanceMiles) / maxDistanceMiles) * 0.3;
   return ratingScore + ridesScore + distanceScore;
 }
