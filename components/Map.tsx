@@ -9,13 +9,16 @@ let PROVIDER_GOOGLE: any;
 let Callout: any;
 
 if (Platform.OS !== 'web') {
-  const Maps = require('react-native-maps');
-  NativeMapView = Maps.default;
-  Marker = Maps.Marker;
-  Polyline = Maps.Polyline;
-  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
-  const Callout = Maps.Callout;  
-  
+  try {
+    const Maps = require('react-native-maps');
+    NativeMapView = Maps.default;
+    Marker = Maps.Marker;
+    Polyline = Maps.Polyline;
+    PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
+    Callout = Maps.Callout;
+  } catch {
+    // react-native-maps is not available in Expo Go — a development build is required.
+  }
 }
 
 export interface MarkerData {
@@ -184,6 +187,16 @@ export default function Map(props: MapComponentProps) {
     );
   }
 
+  if (!NativeMapView) {
+    return (
+      <View style={[styles.container, styles.mapUnavailable]}>
+        <Text style={styles.mapUnavailableText}>
+          Map requires a development build.{'\n'}Run: npx expo run:android / run:ios
+        </Text>
+      </View>
+    );
+  }
+
   const region = {
     latitude,
     longitude,
@@ -248,5 +261,17 @@ const styles = StyleSheet.create({
   map: {
     width: '100%',
     height: '100%',
+  },
+  mapUnavailable: {
+    backgroundColor: '#E5E7EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  mapUnavailableText: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
