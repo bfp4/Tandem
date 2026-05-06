@@ -14,8 +14,10 @@
         "NSLocationWhenInUseUsageDescription": "Huber needs your location to show nearby drivers and track your ride.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Huber needs your location in the background to track your active ride.",
         "NSCameraUsageDescription": "Huber accesses your camera so you can take a profile photo.",
-        "NSPhotoLibraryUsageDescription": "Huber accesses your photos so you can set a profile picture."
-      }
+        "NSPhotoLibraryUsageDescription": "Huber accesses your photos so you can set a profile picture.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.anonymous.huber"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,9 +29,6 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.RECORD_AUDIO"
@@ -72,13 +71,19 @@
       [
         "react-native-maps",
         {
-          "googleMapsApiKey": "YOUR_GOOGLE_MAPS_ANDROID_API_KEY"
+          "googleMapsApiKey": "AIzaSyAi7ABY7uk20Vckx1NN3HyLTnRI9B43Jps"
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0725a65a-1957-4038-aed2-748491ddbf94"
+      }
     }
   }
 }

@@ -1469,22 +1469,23 @@ function HomeScreenInner() {
                   </View>
                 </View>
 
+                <RidePricingInfo
+                  request={ride.request}
+                  rideDistanceMeters={
+                    geoPointToLatLng(ride.request.pickupLocation) &&
+                      geoPointToLatLng(ride.request.dropoffLocation)
+                      ? getDistanceMeters(
+                        geoPointToLatLng(ride.request.pickupLocation)!,
+                        geoPointToLatLng(ride.request.dropoffLocation)!
+                      )
+                      : null
+                  }
+                />
+
                 <TouchableOpacity
                   style={styles.profileRow}
                   onPress={() => handleViewProfile(ride.otherUser)}
                 >
-                  <RidePricingInfo
-                    request={ride.request}
-                    rideDistanceMeters={
-                      geoPointToLatLng(ride.request.pickupLocation) &&
-                        geoPointToLatLng(ride.request.dropoffLocation)
-                        ? getDistanceMeters(
-                          geoPointToLatLng(ride.request.pickupLocation)!,
-                          geoPointToLatLng(ride.request.dropoffLocation)!
-                        )
-                        : null
-                    }
-                  />
                   <View style={styles.avatarSmall}>
                     <Ionicons name="person" size={18} color="#999" />
                   </View>
@@ -1834,8 +1835,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 12,
     backgroundColor: CARD_BG,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
   },
   headerRow: {
     flexDirection: 'row',
