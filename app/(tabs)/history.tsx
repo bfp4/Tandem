@@ -755,7 +755,6 @@ export default function ScheduleScreen() {
           />
           <View style={styles.modalSheet}>
             <View style={styles.sheetHandle} />
-            <View style={{ flex: 1 }}>
               <ScrollView 
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingBottom: 20 }}
@@ -862,7 +861,6 @@ export default function ScheduleScreen() {
               );
             })()}
             </ScrollView>
-            </View>
           </View>
         </View>
       </Modal>
@@ -1580,7 +1578,7 @@ const styles = StyleSheet.create({
   },
   modalSheet: {
     backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingHorizontal: 24, paddingBottom: 20, paddingTop: 12, maxHeight: '88%',
+    paddingHorizontal: 24, paddingBottom: 40, paddingTop: 12, maxHeight: '80%',
   },
   sheetHandle: {
     width: 40, height: 4, borderRadius: 2, backgroundColor: '#d1d1d6',

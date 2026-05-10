@@ -70,13 +70,19 @@
       [
         "react-native-maps",
         {
-          "googleMapsApiKey": "YOUR_GOOGLE_MAPS_ANDROID_API_KEY"
+          "googleMapsApiKey": "AIzaSyAi7ABY7uk20Vckx1NN3HyLTnRI9B43Jps"
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0725a65a-1957-4038-aed2-748491ddbf94"
+      }
     }
   }
 }

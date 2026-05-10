@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
 
@@ -16,8 +16,11 @@ if (Platform.OS !== 'web') {
     Polyline = Maps.Polyline;
     PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
     Callout = Maps.Callout;
-  } catch {
+  } catch (error) {
     // react-native-maps is not available in Expo Go — a development build is required.
+    if (__DEV__) {
+      console.error('Failed to load react-native-maps. Use a development build (expo run:android / run:ios).', error);
+    }
   }
 }
 
@@ -208,7 +211,7 @@ export default function Map(props: MapComponentProps) {
     <View style={styles.container}>
       <NativeMapView
         ref={mapRef}
-        provider={PROVIDER_GOOGLE}
+        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
         style={styles.map}
         initialRegion={region}
       >
