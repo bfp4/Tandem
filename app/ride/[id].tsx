@@ -1,16 +1,18 @@
+import { db } from '@/config/firebase';
 import { useAuth } from '@/context/AuthContext';
 import {
   completeRide,
-  getConfirmationById,
   type RideConfirmationWithId,
 } from '@/services/rideConfirmationService';
 import { cancelRideRequest, getRideRequestById, type RideRequestWithId } from '@/services/rideRequestService';
 import { getUser } from '@/services/userService';
+import type { RideConfirmation } from '@/types/rideConfirmation';
 import type { User as AppUser } from '@/types/user';
 import { reverseGeocode } from '@/utils/geocoding';
 import { fetchRouteWithSteps, getManeuverIcon, type RouteStep } from '@/utils/routing';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -108,48 +110,118 @@ export default function RideScreen() {
 
   const lastRouteFetchLocation = useRef<{ latitude: number; longitude: number } | null>(null);
   const locationSubRef = useRef<Location.LocationSubscription | null>(null);
+  /** Tracks last emitted status so we detect driver completing while passenger is on this screen */
+  const lastConfirmationStatusRef = useRef<RideConfirmation['status'] | null>(null);
+  const fetchedRideRequestIdRef = useRef<string | null>(null);
+
   const isDriver = confirmation && user ? confirmation.driverId === user.uid : false;
 
-  // Load ride data
+  // Real-time confirmation doc — passenger UI must react when driver completes elsewhere
   useEffect(() => {
-    if (!id || !user) return;
+    if (!id || typeof id !== 'string' || !user) return;
+
+    lastConfirmationStatusRef.current = null;
+    fetchedRideRequestIdRef.current = null;
+    const confirmRef = doc(db, 'rideConfirmations', id);
+
+    const unsub = onSnapshot(
+      confirmRef,
+      (snap) => {
+        if (!snap.exists()) {
+          setLoading(false);
+          Alert.alert('Ride ended', 'This ride was cancelled or is no longer available.');
+          router.replace('/(tabs)/home');
+          return;
+        }
+
+        const conf: RideConfirmationWithId = {
+          id: snap.id,
+          ...(snap.data() as RideConfirmation),
+        };
+
+        const prev = lastConfirmationStatusRef.current;
+        lastConfirmationStatusRef.current = conf.status;
+        setLoading(false);
+
+        if (conf.status !== 'in_progress') {
+          const shouldRate =
+            prev === 'in_progress'
+            || (prev === null && conf.status === 'completed');
+
+          if (shouldRate) {
+            const otherUserId =
+              conf.driverId === user.uid ? conf.riderId : conf.driverId;
+            router.replace({
+              pathname: '/ride/rate',
+              params: {
+                rideRequestId: conf.rideRequestId,
+                otherUserId,
+                otherUserName: otherUser?.name ?? 'your match',
+              },
+            });
+            return;
+          }
+
+          Alert.alert(
+            'Ride unavailable',
+            'This ride isn’t active for live navigation anymore.',
+          );
+          router.replace('/(tabs)/home');
+          return;
+        }
+
+        setConfirmation(conf);
+      },
+      (err) => {
+        console.error('ride confirmation snapshot error:', err);
+        setLoading(false);
+        Alert.alert('Error', err.message ?? 'Could not sync ride.');
+        router.back();
+      },
+    );
+
+    return () => unsub();
+  }, [id, user, router]);
+
+  /** Load ride request + other profile once per rideRequestId */
+  useEffect(() => {
+    const rideRequestId = confirmation?.rideRequestId;
+    const driverId = confirmation?.driverId;
+    const riderId = confirmation?.riderId;
+    if (!rideRequestId || !driverId || !riderId || !user) return;
+
+    if (fetchedRideRequestIdRef.current === rideRequestId) return;
+
+    let cancelled = false;
 
     (async () => {
       try {
-        const conf = await getConfirmationById(id);
-        if (!conf) {
-          Alert.alert('Error', 'Ride not found.');
-          router.back();
-          return;
-        }
-        setConfirmation(conf);
+        const req = await getRideRequestById(rideRequestId);
+        if (cancelled || !req) return;
 
-        const req = await getRideRequestById(conf.rideRequestId);
-        if (!req) {
-          Alert.alert('Error', 'Ride request not found.');
-          router.back();
-          return;
-        }
+        fetchedRideRequestIdRef.current = rideRequestId;
         setRequest(req);
 
-        const otherId = conf.driverId === user.uid ? conf.riderId : conf.driverId;
+        const otherId = driverId === user.uid ? riderId : driverId;
         const other = await getUser(otherId);
+        if (cancelled) return;
         setOtherUser(other);
 
         const dropoff = geoPointToLatLng(req.dropoffLocation);
         if (dropoff) {
           const addr = await reverseGeocode(dropoff.latitude, dropoff.longitude);
-          setDropoffAddress(addr);
+          if (!cancelled) setDropoffAddress(addr);
         }
       } catch (e: any) {
-        console.error('Error loading ride data:', e);
-        Alert.alert('Error', 'Failed to load ride data.');
-        router.back();
-      } finally {
-        setLoading(false);
+        console.error('Error loading ride request / rider profile:', e);
+        if (!cancelled) Alert.alert('Error', e.message ?? 'Failed to load ride details.');
       }
     })();
-  }, [id, user]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [confirmation?.rideRequestId, confirmation?.driverId, confirmation?.riderId, user]);
 
   // Start location tracking
   useEffect(() => {
@@ -273,7 +345,7 @@ export default function RideScreen() {
     if (!confirmation || !user) return;
     setCancelling(true);
     try {
-      await cancelRideRequest(confirmation.rideRequestId, user.uid);
+      await cancelRideRequest(confirmation.rideRequestId, user.uid, confirmation.id);
       router.replace('/(tabs)/home');
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Could not cancel ride.');

@@ -102,14 +102,15 @@ function filterSubscriptionsRows(
 
 /**
  * Returns the next date matching one of `repeatDays` strictly after `afterDate`.
- * `repeatDays` entries are three-letter uppercase abbreviations e.g. "MON", "WED".
+ * `repeatDays` entries may be three-letter abbreviations in any casing ("Mon", "MON", "mon").
  */
 function getNextOccurrence(repeatDays: string[], afterDate: string): string {
   const base = new Date(afterDate + 'T00:00:00');
   for (let offset = 1; offset <= 7; offset++) {
     const d = new Date(base);
     d.setDate(base.getDate() + offset);
-    if (repeatDays.includes(DAY_NAMES[d.getDay()])) {
+    const dayAbbrev = DAY_NAMES[d.getDay()]; // e.g. "SUN"
+    if (repeatDays.some(rd => rd.toLowerCase().slice(0, 3) === dayAbbrev.toLowerCase().slice(0, 3))) {
       return d.toISOString().slice(0, 10);
     }
   }

@@ -93,3 +93,31 @@ export async function getRatingsByUser(userId: string): Promise<Rating[]> {
   );
   return snap.docs.map((d) => d.data() as Rating);
 }
+
+/**
+ * Computes average rating received by a user from `/ratings` (same formula as Cloud Functions).
+ * Uses a simple equality query (no composite index). Preferred over user doc alone when triggers
+ * are not deployed yet.
+ */
+export async function aggregateRatingForUser(toUserId: string): Promise<{
+  average: number;
+  count: number;
+} | null> {
+  const snap = await getDocs(
+    query(collection(db, 'ratings'), where('toUserId', '==', toUserId)),
+  );
+  if (snap.empty) return null;
+  let sum = 0;
+  let count = 0;
+  snap.forEach((d) => {
+    const raw = (d.data() as Rating).score;
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    if (Number.isFinite(n)) {
+      sum += n;
+      count += 1;
+    }
+  });
+  if (count === 0) return null;
+  const avg = Math.round((sum / count) * 10) / 10;
+  return { average: avg, count };
+}

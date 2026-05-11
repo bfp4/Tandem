@@ -59,27 +59,30 @@ function effectiveDays(
 // ─── Schedule matching helpers ────────────────────────────────────────────────
 
 /**
- * Returns true if a driver availability block fully contains the ride window
- * [rideStartMin, rideEndMin] on the given day.
+ * Returns true if a rider's departure time falls within a driver's availability
+ * block on the given day.
  *
- * "Fully contains" means:
- *   block.startTime <= rideStart  AND  rideEnd <= block.endTime
+ * A driver block represents when the driver is available to *start* a pickup,
+ * not when all rides must be completed. OSRM duration estimates can vary, so
+ * requiring the full ride window to fit inside the block would cause valid
+ * matches to be silently dropped (e.g. a 65-min ride departing at 10:45 PM
+ * would fail to match a block ending at 11:45 PM even though the pickup is
+ * perfectly within the window).
  *
- * Edge-case guarded: a ride at 1:45 PM that takes 20 min ends at 2:05 PM and
- * will NOT match a block ending at 2:00 PM.
+ * Condition:  blockStart <= rideStart < blockEnd
  */
 function blockCoversRide(
   block: ScheduleBlock,
   day: string,
   rideStartMin: number,
-  rideEndMin: number,
+  _rideEndMin: number,
 ): boolean {
   if (!effectiveDays(block.repeating, block.repeatDays, block.date).some(d => daysMatch(d, day))) {
     return false;
   }
   const blockStart = toMin(block.startTime);
   const blockEnd = toMin(block.endTime);
-  return rideStartMin >= blockStart && rideEndMin <= blockEnd;
+  return rideStartMin >= blockStart && rideStartMin < blockEnd;
 }
 
 /**
@@ -89,6 +92,10 @@ function blockCoversRide(
  * Two intervals [a, b) and [c, d) overlap iff a < d AND c < b.
  * This correctly handles back-to-back rides (e.g. one ends at 2:00, next starts
  * at 2:00 — they do NOT conflict).
+ *
+ * Stale confirmed rides are excluded:
+ *   - Non-repeating rides whose date has already passed.
+ *   - Repeating rides whose repeatEndsAt timestamp has passed.
  */
 function requestConflicts(
   req: RideRequest,
@@ -96,6 +103,19 @@ function requestConflicts(
   rideStartMin: number,
   rideEndMin: number,
 ): boolean {
+  const now = new Date();
+
+  // Skip one-off confirmed rides that occurred in the past.
+  if (!req.repeating && req.date) {
+    const rideDay = new Date(req.date + 'T23:59:59');
+    if (rideDay < now) return false;
+  }
+
+  // Skip repeating confirmed rides whose series has already ended.
+  if (req.repeating && req.repeatEndsAt) {
+    if (req.repeatEndsAt.toDate() < now) return false;
+  }
+
   if (!effectiveDays(req.repeating, req.repeatDays, req.date).some(d => daysMatch(d, day))) {
     return false;
   }
@@ -143,30 +163,32 @@ export interface MatchResult {
  * activeRole:
  *
  *   rider  → finds drivers whose availability covers at least one of the
- *             rider's scheduled rides and who are not already booked.
+ *             rider's scheduled rides and who are within 25 miles of the
+ *             ride's pickup location.
  *
  *   driver → finds riders who have at least one scheduled ride that fits
- *             fully inside one of the driver's open availability windows
- *             and does not conflict with the driver's confirmed bookings.
+ *             fully inside one of the driver's open availability windows,
+ *             whose pickup location is within 25 miles of the driver's
+ *             profile location.
  */
 export async function getMatchedUsers(
   currentUser: User,
-  refLat: number | null,
-  refLng: number | null,
+  userLat: number | null = null,
+  userLng: number | null = null,
   maxDistanceMiles: number = DEFAULT_MAX_DISTANCE_MILES,
 ): Promise<MatchResult[]> {
   if (currentUser.activeRole === 'rider') {
-    return findDriversForRider(currentUser, refLat, refLng, maxDistanceMiles);
+    return findDriversForRider(currentUser, userLat, userLng, maxDistanceMiles);
   }
-  return findRidersForDriver(currentUser, refLat, refLng, maxDistanceMiles);
+  return findRidersForDriver(currentUser, maxDistanceMiles);
 }
 
 // ─── Rider → find drivers ─────────────────────────────────────────────────────
 
 async function findDriversForRider(
   rider: User,
-  refLat: number | null,
-  refLng: number | null,
+  userLat: number | null,
+  userLng: number | null,
   maxDistanceMiles: number,
 ): Promise<MatchResult[]> {
   // 1. Fetch the rider's active scheduled rides (single-field query, no composite index).
@@ -223,8 +245,10 @@ async function findDriversForRider(
     }
   }
 
-  // 6. Fetch driver profiles and build results (drivers with more compatible rides rank higher).
-  const results = await buildResults(candidates, 'driverId', refLat, refLng, maxDistanceMiles, rider.uid);
+  // 6. Fetch driver profiles and build results.
+  // Distance is measured from the rider's current GPS location (if available) to each
+  // ride's pickup coords; falls back to the driver's profile location.
+  const results = await buildResults(candidates, 'driverId', userLat, userLng, maxDistanceMiles, rider.uid);
   results.sort((a, b) => b.score - a.score);
   return results;
 }
@@ -233,8 +257,6 @@ async function findDriversForRider(
 
 async function findRidersForDriver(
   driver: User,
-  refLat: number | null,
-  refLng: number | null,
   maxDistanceMiles: number,
 ): Promise<MatchResult[]> {
   // 1. Fetch the driver's own availability blocks.
@@ -285,9 +307,17 @@ async function findRidersForDriver(
     }
   }
 
-  // 6. Fetch rider profiles in parallel and build results
+  // 6. Fetch rider profiles in parallel and build results.
+  // Distance is measured from the driver's profile location to each ride's pickup coords.
   const mappedCandidates = candidates.map(c => ({ driverId: c.riderId, matchingRides: c.matchingRides }));
-  const results = await buildResults(mappedCandidates, 'riderId', refLat, refLng, maxDistanceMiles, driver.uid);
+  const results = await buildResults(
+    mappedCandidates,
+    'riderId',
+    driver.lat ?? null,
+    driver.lng ?? null,
+    maxDistanceMiles,
+    driver.uid,
+  );
   results.sort((a, b) => b.score - a.score);
   return results;
 }
@@ -296,7 +326,7 @@ async function findRidersForDriver(
 
 /**
  * For each riderRide × each repeatDay, checks whether at least one driver block
- * fully contains the ride time AND no confirmed ride conflicts with it.
+ * covers the ride departure time AND no confirmed ride conflicts with it.
  *
  * Returns one RideMatchInfo per (ride, day) pair that passes — de-duplicated so
  * each ride is counted once per unique (day, departureTime, pickup, dropoff).
@@ -317,7 +347,7 @@ function computeMatchingRides(
       const key = `${ride.id}|${day}`;
       if (seen.has(key)) continue;
 
-      // Must have a block that fully contains [startMin, endMin]
+      // Driver must be available at the ride's departure time.
       const covered = driverBlocks.some(b => blockCoversRide(b, day, startMin, endMin));
       if (!covered) continue;
 
@@ -347,11 +377,23 @@ function computeMatchingRides(
 
 // ─── Result builder ───────────────────────────────────────────────────────────
 
+/**
+ * Builds MatchResult entries and filters by ride-pickup proximity.
+ *
+ * Distance is always measured from the *driver's* location to the *ride's pickup*:
+ *
+ *   rider→driver  currentUserLat/Lng = null → use profileUser.lat/lng (the candidate driver)
+ *   driver→rider  currentUserLat/Lng = driver's own lat/lng from their profile
+ *
+ * A candidate is dropped when ALL of their matching rides are farther than
+ * maxDistanceMiles from the driver. The reported distanceMiles is the
+ * shortest distance across all matching rides.
+ */
 async function buildResults(
   candidates: { driverId: string; matchingRides: RideMatchInfo[] }[],
   _role: string,
-  refLat: number | null,
-  refLng: number | null,
+  currentUserLat: number | null,
+  currentUserLng: number | null,
   maxDistanceMiles: number,
   excludeUid: string,
 ): Promise<MatchResult[]> {
@@ -365,17 +407,28 @@ async function buildResults(
         return null;
       }
 
+      // Resolve the driver's location:
+      //   rider→driver: profileUser IS the driver, so use their profile lat/lng.
+      //   driver→rider: currentUserLat/Lng is the driver's own location.
+      const driverLat = currentUserLat ?? profileUser.lat;
+      const driverLng = currentUserLng ?? profileUser.lng;
+
       let distanceMiles = 0;
-      if (
-        refLat !== null && refLng !== null &&
-        profileUser.lat !== undefined && profileUser.lng !== undefined
-      ) {
-        const distKm = distanceBetween(
-          [refLat, refLng],
-          [profileUser.lat, profileUser.lng],
-        );
-        distanceMiles = distKm / MILES_TO_KM;
-        if (distanceMiles > maxDistanceMiles) return null;
+      if (driverLat !== undefined && driverLng !== undefined) {
+        // Find the closest matching ride pickup to the driver.
+        let minDistMiles = Infinity;
+        for (const ride of matchingRides) {
+          const distKm = distanceBetween(
+            [driverLat, driverLng],
+            [ride.pickupLat, ride.pickupLng],
+          );
+          const d = distKm / MILES_TO_KM;
+          if (d < minDistMiles) minDistMiles = d;
+        }
+        if (minDistMiles !== Infinity) {
+          if (minDistMiles > maxDistanceMiles) return null;
+          distanceMiles = minDistMiles;
+        }
       }
 
       const score = computeScore(profileUser, matchingRides.length, distanceMiles, maxDistanceMiles);

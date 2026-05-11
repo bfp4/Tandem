@@ -25,6 +25,22 @@
       ]
     },
     {
+      "collectionGroup": "rideConfirmations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "rideRequestId", "order": "ASCENDING" },
+        { "fieldPath": "driverId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rideConfirmations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "rideRequestId", "order": "ASCENDING" },
+        { "fieldPath": "riderId", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "riderRides",
       "queryScope": "COLLECTION",
       "fields": [

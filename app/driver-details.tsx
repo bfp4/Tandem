@@ -2,6 +2,7 @@ import { useAuth } from '@/context/AuthContext';
 import { getOrCreateConversation } from '@/services/messagingService';
 import type { RideMatchInfo } from '@/services/matchingService';
 import { createNotification } from '@/services/notificationService';
+import { aggregateRatingForUser } from '@/services/ratingService';
 import { createRideRequest } from '@/services/rideRequestService';
 import { Ionicons } from '@expo/vector-icons';
 import { GeoPoint } from 'firebase/firestore';
@@ -31,17 +32,35 @@ function format12h(hhmm: string): string {
   return `${hours}:${String(m).padStart(2, '0')} ${period}`;
 }
 
-/** "YYYY-MM-DD" of the nearest future occurrence of a short day name ("Mon", etc.) */
-function nextDateForDay(dayShort: string): string {
+/**
+ * "YYYY-MM-DD" of the soonest occurrence of a short day name ("Mon", etc.).
+ * Includes today if today matches the target day AND `departureTime` (HH:MM, 24h)
+ * has not yet passed; otherwise rolls to the same weekday next week.
+ */
+function nextDateForDay(dayShort: string, departureTime?: string): string {
   const DAY_MAP: Record<string, number> = {
     Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
   };
   const target = DAY_MAP[dayShort] ?? 0;
   const now = new Date();
-  const daysAhead = ((target - now.getDay() + 7) % 7) || 7;
+  let daysAhead = (target - now.getDay() + 7) % 7;
+
+  if (daysAhead === 0 && departureTime) {
+    const [h, m] = departureTime.split(':').map((n) => parseInt(n, 10));
+    const departureToday = new Date(now);
+    departureToday.setHours(h || 0, m || 0, 0, 0);
+    if (departureToday.getTime() <= now.getTime()) {
+      daysAhead = 7;
+    }
+  }
+
   const d = new Date(now);
   d.setDate(now.getDate() + daysAhead);
-  return d.toISOString().slice(0, 10);
+  // Format as LOCAL YYYY-MM-DD (avoid toISOString which converts to UTC and can shift the day)
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${da}`;
 }
 
 export default function DriverDetailsScreen() {
@@ -51,8 +70,21 @@ export default function DriverDetailsScreen() {
 
   const otherId = params.id as string;
   const otherName = (params.name as string) || 'User';
-  const rating = parseFloat(params.rating as string) || 0;
-  const totalRides = parseInt(params.totalRides as string) || 0;
+
+  /** From navigation; overwritten when `/ratings` aggregate is available */
+  const [displayRating, setDisplayRating] = useState(() => {
+    const n = Number.parseFloat(String(params.rating ?? ''));
+    return Number.isFinite(n) ? Math.max(0, Math.min(5, n)) : 0;
+  });
+  const [displayRideCount, setDisplayRideCount] = useState(() => {
+    const n = Number.parseInt(String(params.totalRides ?? ''), 10);
+    return Number.isFinite(n) ? Math.max(0, n) : 0;
+  });
+
+  const [requestedRideIds, setRequestedRideIds] = useState<Set<string>>(new Set());
+  const [submittingRideId, setSubmittingRideId] = useState<string | null>(null);
+  const [loadingRequests, setLoadingRequests] = useState(true);
+
   const bio = (params.bio as string) || '';
   const distance = (params.distance as string) || '';
   const score = (params.score as string) || '';
@@ -64,18 +96,39 @@ export default function DriverDetailsScreen() {
   } catch {
     matchingRides = [];
   }
-  // #region agent log
-  fetch('http://127.0.0.1:7298/ingest/97313dd6-65fa-4454-bb22-201405ef2283',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'544fc0'},body:JSON.stringify({sessionId:'544fc0',runId:'pre-fix',hypothesisId:'H1',location:'app/driver-details.tsx:params-parse',message:'parsed route params',data:{otherId,myRole,matchingRideCount:matchingRides.length},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion agent log
-
-  // Track which riderRideIds already have a pending request so we don't duplicate
-  const [requestedRideIds, setRequestedRideIds] = useState<Set<string>>(new Set());
-  const [submittingRideId, setSubmittingRideId] = useState<string | null>(null);
-  const [loadingRequests, setLoadingRequests] = useState(true);
 
   useEffect(() => {
-    if (!user) { setLoadingRequests(false); return; }
-    checkExistingRequests();
+    const r = Number.parseFloat(String(params.rating ?? ''));
+    const rides = Number.parseInt(String(params.totalRides ?? ''), 10);
+    setDisplayRating(Number.isFinite(r) ? Math.max(0, Math.min(5, r)) : 0);
+    setDisplayRideCount(Number.isFinite(rides) ? Math.max(0, rides) : 0);
+  }, [otherId, params.rating, params.totalRides]);
+
+  useEffect(() => {
+    if (!otherId?.trim()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const agg = await aggregateRatingForUser(otherId);
+        if (!cancelled && agg && agg.count > 0) {
+          setDisplayRating(agg.average);
+          setDisplayRideCount(agg.count);
+        }
+      } catch (e) {
+        console.warn('driver-details: aggregateRatingForUser failed', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [otherId]);
+
+  useEffect(() => {
+    if (!user) {
+      setLoadingRequests(false);
+      return;
+    }
+    void checkExistingRequests();
   }, [user, otherId]);
 
   const checkExistingRequests = async () => {
@@ -111,9 +164,6 @@ export default function DriverDetailsScreen() {
         }
       });
       setRequestedRideIds(alreadyRequestedIds);
-      // #region agent log
-      fetch('http://127.0.0.1:7298/ingest/97313dd6-65fa-4454-bb22-201405ef2283',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'544fc0'},body:JSON.stringify({sessionId:'544fc0',runId:'pre-fix',hypothesisId:'H2',location:'app/driver-details.tsx:checkExistingRequests',message:'existing requests loaded',data:{riderId1,driverId1,riderId2,driverId2,requestedCount:alreadyRequestedIds.size},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion agent log
     } catch (e) {
       console.warn('Could not load existing requests:', e);
     } finally {
@@ -128,9 +178,6 @@ export default function DriverDetailsScreen() {
     const driverId = myRole === 'rider' ? otherId : user.uid;
     const initiatedBy = myRole as 'rider' | 'driver';
     const notifyUserId = myRole === 'rider' ? driverId : riderId;
-    // #region agent log
-    fetch('http://127.0.0.1:7298/ingest/97313dd6-65fa-4454-bb22-201405ef2283',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'544fc0'},body:JSON.stringify({sessionId:'544fc0',runId:'pre-fix',hypothesisId:'H3',location:'app/driver-details.tsx:handleRequestMatch',message:'request match initiated',data:{rideId:ride.riderRideId,riderId,driverId,notifyUserId,initiatedBy},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion agent log
 
     setSubmittingRideId(ride.riderRideId);
     try {
@@ -142,7 +189,7 @@ export default function DriverDetailsScreen() {
         initiatedBy,
         requestedStart: ride.departureTime,
         requestedEnd: ride.arrivalTime,
-        date: nextDateForDay(ride.day),
+        date: nextDateForDay(ride.day, ride.departureTime),
         pickupLocation: new GeoPoint(ride.pickupLat, ride.pickupLng),
         dropoffLocation: new GeoPoint(ride.dropoffLat, ride.dropoffLng),
         repeating: true,
@@ -206,12 +253,12 @@ export default function DriverDetailsScreen() {
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
               <Ionicons name="star" size={18} color="#FFB800" />
-              <Text style={styles.statValue}>{rating.toFixed(1)}</Text>
+              <Text style={styles.statValue}>{displayRating.toFixed(1)}</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
               <Ionicons name="car" size={18} color="#666" />
-              <Text style={styles.statValue}>{totalRides} rides</Text>
+              <Text style={styles.statValue}>{displayRideCount} rides</Text>
             </View>
             {distance ? (
               <>

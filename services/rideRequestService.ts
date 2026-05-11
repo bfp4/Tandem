@@ -9,11 +9,14 @@ import {
     doc,
     getDoc,
     getDocs,
+    onSnapshot,
     query,
     runTransaction,
     serverTimestamp,
     updateDoc,
     where,
+    type DocumentReference,
+    type Unsubscribe,
 } from 'firebase/firestore';
 import { createNotification } from './notificationService';
 
@@ -151,26 +154,63 @@ export async function denyRideRequest(requestId: string): Promise<void> {
     respondedAt: serverTimestamp(),
   });
 
-  // Reset the schedule block back to open if it exists
-  const blockSnap = await getDoc(doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId));
-  if (blockSnap.exists()) {
-    await updateDoc(doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId), {
-      status: 'open',
-    });
+  // Reset the schedule block back to open if a real block ID was provided.
+  // Requests originating from the match page use scheduleBlockId = '' — skip those.
+  if (rideRequest.scheduleBlockId && rideRequest.scheduleBlockId.trim() !== '') {
+    const blockSnap = await getDoc(doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId));
+    if (blockSnap.exists()) {
+      await updateDoc(doc(db, 'scheduleBlocks', rideRequest.scheduleBlockId), {
+        status: 'open',
+      });
+    }
   }
 }
 
 export async function cancelRideRequest(
   requestId: string,
   cancelledByUserId?: string,
+  /** When known (Home / ride screen), avoids compound-index queries entirely. */
+  confirmationDocId?: string | null,
 ): Promise<void> {
-  const confirmationsSnap = await getDocs(
-    query(
-      collection(db, 'rideConfirmations'),
-      where('rideRequestId', '==', requestId),
-    ),
-  );
-  const confirmationRefs = confirmationsSnap.docs.map((d) => d.ref);
+  if (!cancelledByUserId?.trim()) {
+    throw new Error('You must be signed in to cancel this ride.');
+  }
+  const participantUid = cancelledByUserId;
+
+  /** Prefer direct doc ref when UI has it — no composite index required. */
+  let confirmationRefs: DocumentReference[];
+  const useKnownDoc =
+    typeof confirmationDocId === 'string' &&
+    confirmationDocId.length > 0 &&
+    !confirmationDocId.startsWith('synthetic_');
+
+  if (useKnownDoc) {
+    confirmationRefs = [doc(db, 'rideConfirmations', confirmationDocId)];
+  } else {
+    /** Fallback: scoped queries (need rideRequestId + driverId/riderId indexes deployed). */
+    const confCol = collection(db, 'rideConfirmations');
+    const [driverSide, riderSide] = await Promise.all([
+      getDocs(
+        query(
+          confCol,
+          where('rideRequestId', '==', requestId),
+          where('driverId', '==', participantUid),
+        ),
+      ),
+      getDocs(
+        query(
+          confCol,
+          where('rideRequestId', '==', requestId),
+          where('riderId', '==', participantUid),
+        ),
+      ),
+    ]);
+
+    const idToRef = new Map<string, DocumentReference>();
+    for (const d of driverSide.docs) idToRef.set(d.id, d.ref);
+    for (const d of riderSide.docs) idToRef.set(d.id, d.ref);
+    confirmationRefs = [...idToRef.values()];
+  }
 
   await runTransaction(db, async (tx) => {
     // ── Phase 1: All reads first ──
@@ -189,7 +229,7 @@ export async function cancelRideRequest(
 
     // Read all confirmation documents
     const confirmationSnaps = await Promise.all(
-      confirmationRefs.map(ref => tx.get(ref))
+      confirmationRefs.map((ref) => tx.get(ref)),
     );
 
     // ── Phase 2: All writes ──
@@ -200,29 +240,28 @@ export async function cancelRideRequest(
       tx.update(blockRef, { status: 'open' });
     }
 
-    // Delete all existing confirmations
+    // Delete confirmations tied to this ride request (skip unrelated / phantom reads)
     confirmationSnaps.forEach((snap, i) => {
-      if (snap.exists()) {
-        tx.delete(confirmationRefs[i]);
-      }
+      if (!snap.exists()) return;
+      const data = snap.data() as { rideRequestId?: string };
+      if (data.rideRequestId !== requestId) return;
+      tx.delete(confirmationRefs[i]);
     });
   });
 
-  if (confirmationRefs.length > 0) {
-    const requestSnap = await getDoc(doc(db, 'rideRequests', requestId));
-    if (requestSnap.exists()) {
-      const rideRequest = requestSnap.data() as RideRequest;
-      const otherUserId =
-        cancelledByUserId === rideRequest.driverId
-          ? rideRequest.riderId
-          : rideRequest.driverId;
-      await createNotification(
-        otherUserId,
-        'ride_cancelled',
-        requestId,
-        'Your ride has been cancelled.',
-      );
-    }
+  const requestSnap = await getDoc(doc(db, 'rideRequests', requestId));
+  if (requestSnap.exists()) {
+    const rideRequest = requestSnap.data() as RideRequest;
+    const otherUserId =
+      cancelledByUserId === rideRequest.driverId
+        ? rideRequest.riderId
+        : rideRequest.driverId;
+    await createNotification(
+      otherUserId,
+      'ride_cancelled',
+      requestId,
+      'Your ride has been cancelled.',
+    );
   }
 }
 
@@ -263,6 +302,53 @@ export async function getAssociatedDriversForRider(riderId: string): Promise<Use
     driverIds.map((id) => getDoc(doc(db, 'users', id))),
   );
   return results.filter((s) => s.exists()).map((s) => s.data() as User);
+}
+
+/**
+ * Real-time listener for pending ride requests involving a user (as driver or rider).
+ * Queries by single field only (no composite index required) and filters status client-side.
+ */
+export function subscribeToUserPendingRequests(
+  userId: string,
+  onUpdate: (requests: RideRequestWithId[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  let driverResults: RideRequestWithId[] = [];
+  let riderResults: RideRequestWithId[] = [];
+
+  function merge(): void {
+    const map = new Map<string, RideRequestWithId>();
+    for (const r of [...driverResults, ...riderResults]) {
+      if (r.status === 'pending') map.set(r.id, r);
+    }
+    onUpdate([...map.values()]);
+  }
+
+  const driverQ = query(collection(db, 'rideRequests'), where('driverId', '==', userId));
+  const riderQ = query(collection(db, 'rideRequests'), where('riderId', '==', userId));
+
+  const unsubDriver = onSnapshot(
+    driverQ,
+    (snap) => {
+      driverResults = snap.docs.map((d) => ({ id: d.id, ...(d.data() as RideRequest) }));
+      merge();
+    },
+    (err) => onError?.(err instanceof Error ? err : new Error(String(err))),
+  );
+
+  const unsubRider = onSnapshot(
+    riderQ,
+    (snap) => {
+      riderResults = snap.docs.map((d) => ({ id: d.id, ...(d.data() as RideRequest) }));
+      merge();
+    },
+    (err) => onError?.(err instanceof Error ? err : new Error(String(err))),
+  );
+
+  return () => {
+    unsubDriver();
+    unsubRider();
+  };
 }
 
 export async function getAssociatedRidersForDriver(driverId: string): Promise<User[]> {

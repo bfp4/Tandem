@@ -3,6 +3,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function rideRequestData(requestId) {
+      return get(/databases/$(database)/documents/rideRequests/$(requestId)).data;
+    }
+
     match /users/{userId} {
       // Any authenticated user can read any profile (needed for username uniqueness checks)
       allow read: if request.auth != null;
@@ -11,7 +15,42 @@ service cloud.firestore {
 
       match /historyBlocks/{blockId} {
         allow read: if request.auth != null && request.auth.uid == userId;
-        allow write: if request.auth != null && request.auth.uid == userId;
+
+        // Owner writes their own history
+        allow create: if request.auth != null && request.auth.uid == userId;
+
+        // completeRide writes the counterpart's doc too (same rideRequestId, role/userId aligned)
+        allow create: if request.auth != null
+          && request.auth.uid != userId
+          && request.resource.data.rideRequestId is string
+          && request.resource.data.rideRequestId.size() > 0
+          && exists(/databases/$(database)/documents/rideRequests/$(request.resource.data.rideRequestId))
+          && (
+            request.auth.uid == rideRequestData(request.resource.data.rideRequestId).driverId
+            || request.auth.uid == rideRequestData(request.resource.data.rideRequestId).riderId
+          )
+          && (
+            userId == rideRequestData(request.resource.data.rideRequestId).driverId
+            || userId == rideRequestData(request.resource.data.rideRequestId).riderId
+          )
+          && (
+            (
+              request.resource.data.role == 'driver'
+              && userId == rideRequestData(request.resource.data.rideRequestId).driverId
+            )
+            || (
+              request.resource.data.role == 'rider'
+              && userId == rideRequestData(request.resource.data.rideRequestId).riderId
+            )
+          )
+          && (
+            (userId == rideRequestData(request.resource.data.rideRequestId).driverId
+             && request.resource.data.otherUserId == rideRequestData(request.resource.data.rideRequestId).riderId)
+            || (userId == rideRequestData(request.resource.data.rideRequestId).riderId
+                && request.resource.data.otherUserId == rideRequestData(request.resource.data.rideRequestId).driverId)
+          );
+
+        allow update, delete: if request.auth != null && request.auth.uid == userId;
       }
     }
 
@@ -37,11 +76,21 @@ service cloud.firestore {
     match /scheduleBlocks/{blockId} {
       // Any authenticated user can read schedule blocks (e.g. to view a driver's availability)
       allow read: if request.auth != null;
-      // Only the owner of the block can create, update, or delete it
-      allow write: if request.auth != null
-        && request.auth.uid == resource.data.userId;
       allow create: if request.auth != null
         && request.auth.uid == request.resource.data.userId;
+
+      allow delete: if request.auth != null
+        && request.auth.uid == resource.data.userId;
+
+      // Owners may update freely; rider OR driver cancelling a booked ride needs to reopen the block.
+      allow update: if request.auth != null && (
+        request.auth.uid == resource.data.userId
+        || (
+          resource.data.status == 'booked'
+          && request.resource.data.status == 'open'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        )
+      );
     }
 
     match /rideRequests/{requestId} {

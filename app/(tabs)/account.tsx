@@ -3,6 +3,7 @@ import {
   changeEmailWithCurrentPassword,
   changePasswordWithCurrentPassword,
 } from '@/services/authService';
+import { aggregateRatingForUser } from '@/services/ratingService';
 import {
   getBlockedAccounts,
   getFavorites,
@@ -67,7 +68,12 @@ export default function AccountScreen() {
   const [securityNewPassword, setSecurityNewPassword] = useState('');
   const [securityNewEmail, setSecurityNewEmail] = useState('');
   const [securitySaving, setSecuritySaving] = useState(false);
-  const starRatingValue = Math.max(0, Math.min(5, Number.parseInt(starRating, 10) || 0));
+  /** Average 0–5; use parseFloat so values like 4.7 from Firestore render correctly */
+  const starRatingNumeric = Math.max(
+    0,
+    Math.min(5, Number.parseFloat(starRating) || 0),
+  );
+  const starFilledCount = Math.min(5, Math.max(0, Math.round(starRatingNumeric)));
 
   // Preferences (Account Center)
   const [prefNotificationsEnabled, setPrefNotificationsEnabled] = useState(true);
@@ -193,11 +199,23 @@ export default function AccountScreen() {
         setPaymentMethod(typeof bankInfo.paymentMethod === 'string' ? bankInfo.paymentMethod : '');
         setPayoutMethod(typeof bankInfo.payoutMethod === 'string' ? bankInfo.payoutMethod : '');
         setActiveRole(data.activeRole || '');
-        setStarRating(
+
+        const docStarRating =
           data.starRating !== undefined && data.starRating !== null
             ? String(data.starRating)
-            : ''
-        );
+            : '';
+
+        try {
+          const aggregated = await aggregateRatingForUser(user.uid);
+          if (aggregated && aggregated.count > 0) {
+            setStarRating(String(aggregated.average));
+          } else {
+            setStarRating(docStarRating);
+          }
+        } catch (aggErr) {
+          console.warn('aggregateRatingForUser failed; using profile starRating', aggErr);
+          setStarRating(docStarRating);
+        }
 
         if (data.createdAt?.toDate) {
           setCreatedAtText(data.createdAt.toDate().toLocaleDateString());
@@ -635,13 +653,18 @@ export default function AccountScreen() {
                 {Array.from({ length: 5 }).map((_, idx) => (
                   <Ionicons
                     key={idx}
-                    name={idx < starRatingValue ? 'star' : 'star-outline'}
+                    name={idx < starFilledCount ? 'star' : 'star-outline'}
                     size={14}
-                    color={starRating ? '#F5B301' : '#C7C7CC'}
+                    color={starRatingNumeric > 0 ? '#F5B301' : '#C7C7CC'}
                     style={idx === 4 ? undefined : { marginRight: 2 }}
                   />
                 ))}
               </View>
+              {starRatingNumeric > 0 ? (
+                <Text style={styles.profileRatingNumber}>{starRatingNumeric.toFixed(1)}</Text>
+              ) : (
+                <Text style={styles.profileRatingNew}>New</Text>
+              )}
               {activeRole?.trim() ? (
                 <View style={styles.roleBadge}>
                   <Text style={styles.roleBadgeText}>
@@ -714,7 +737,7 @@ export default function AccountScreen() {
                   {Array.from({ length: 5 }).map((_, idx) => (
                     <Ionicons
                       key={idx}
-                      name={idx < starRatingValue ? 'star' : 'star-outline'}
+                      name={idx < starFilledCount ? 'star' : 'star-outline'}
                       size={18}
                       color="#F5B301"
                       style={idx === 4 ? undefined : { marginRight: 2 }}
@@ -1711,6 +1734,17 @@ const styles = StyleSheet.create({
   profileHeaderStars: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  profileRatingNumber: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#444',
+    minWidth: 28,
+  },
+  profileRatingNew: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#9CA3AF',
   },
   roleBadge: {
     backgroundColor: '#EEF2FF',
