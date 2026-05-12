@@ -111,7 +111,7 @@ export default function UserDetailsScreen() {
         const encoded = encodeURIComponent(text.trim());
         const res = await fetch(
           `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&addressdetails=1&limit=8&featuretype=house`,
-          { headers: { 'Accept-Language': 'en', 'User-Agent': 'HuberApp/1.0' } }
+          { headers: { 'Accept-Language': 'en', 'User-Agent': 'TandemApp/1.0' } }
         );
         const raw: AddressSuggestion[] = await res.json();
         // Keep only street-level results (houses, buildings, roads)

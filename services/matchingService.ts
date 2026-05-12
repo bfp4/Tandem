@@ -5,6 +5,7 @@ import type { ScheduleBlock } from '@/types/scheduleBlock';
 import type { User } from '@/types/user';
 import { distanceBetween } from 'geofire-common';
 import { collection, getDocs, query, where } from 'firebase/firestore';
+import { aggregateRatingForUser } from './ratingService';
 import { getAllDrivers, getAllRiders, getUser } from './userService';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -402,7 +403,19 @@ async function buildResults(
       if (driverId === excludeUid) return null;
       let profileUser: User;
       try {
-        profileUser = await getUser(driverId);
+        const [fetchedUser, agg] = await Promise.all([
+          getUser(driverId),
+          aggregateRatingForUser(driverId).catch(() => null),
+        ]);
+        profileUser = fetchedUser;
+        // Same as driver-details: user doc aggregates can lag if CFs aren't deployed yet.
+        if (agg && agg.count > 0) {
+          profileUser = {
+            ...profileUser,
+            starRating: agg.average,
+            rideCount: agg.count,
+          };
+        }
       } catch {
         return null;
       }
@@ -453,7 +466,14 @@ function computeScore(
   distanceMiles: number,
   maxDistanceMiles: number,
 ): number {
-  const ratingScore = (user.starRating / 5.0) * 0.4;
+  const rawRating =
+    typeof user.starRating === 'number' && Number.isFinite(user.starRating)
+      ? user.starRating
+      : Number(user.starRating);
+  const cappedRating = Number.isFinite(rawRating)
+    ? Math.max(0, Math.min(5, rawRating))
+    : 0;
+  const ratingScore = (cappedRating / 5.0) * 0.4;
   const ridesScore = (Math.min(matchingRidesCount, 5) / 5) * 0.4;
   const distanceScore = (1 - Math.min(distanceMiles, maxDistanceMiles) / maxDistanceMiles) * 0.2;
   return ratingScore + ridesScore + distanceScore;

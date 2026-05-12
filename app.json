@@ -1,29 +1,28 @@
 {
   "expo": {
-    "name": "huber",
-    "slug": "huber",
+    "name": "Tandem",
+    "slug": "tandem",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "huber",
+    "scheme": "tandem",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Huber needs your location to show nearby drivers and track your ride.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Huber needs your location in the background to track your active ride.",
-        "NSCameraUsageDescription": "Huber accesses your camera so you can take a profile photo.",
-        "NSPhotoLibraryUsageDescription": "Huber accesses your photos so you can set a profile picture."
+        "NSLocationWhenInUseUsageDescription": "Tandem needs your location to show nearby drivers and track your ride.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Tandem needs your location in the background to track your active ride.",
+        "NSCameraUsageDescription": "Tandem accesses your camera so you can take a profile photo.",
+        "NSPhotoLibraryUsageDescription": "Tandem accesses your photos so you can set a profile picture.",
+        "ITSAppUsesNonExemptEncryption": false
       },
-      "bundleIdentifier": "com.anonymous.huber"
+      "bundleIdentifier": "com.anonymous.tandem"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#F5F5F5",
+        "foregroundImage": "./assets/images/android-icon-foreground.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -32,7 +31,7 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.anonymous.huber"
+      "package": "com.anonymous.tandem"
     },
     "web": {
       "output": "static",
@@ -46,8 +45,9 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#F5F5F5",
           "dark": {
+            "image": "./assets/images/splash-icon-dark.png",
             "backgroundColor": "#000000"
           }
         }
@@ -55,16 +55,16 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Huber needs your location to show nearby drivers and track your ride.",
-          "locationAlwaysAndWhenInUsePermission": "Huber needs your location in the background to track your active ride.",
+          "locationWhenInUsePermission": "Tandem needs your location to show nearby drivers and track your ride.",
+          "locationAlwaysAndWhenInUsePermission": "Tandem needs your location in the background to track your active ride.",
           "isAndroidBackgroundLocationEnabled": false
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Huber accesses your photos so you can set a profile picture.",
-          "cameraPermission": "Huber accesses your camera so you can take a profile photo."
+          "photosPermission": "Tandem accesses your photos so you can set a profile picture.",
+          "cameraPermission": "Tandem accesses your camera so you can take a profile photo."
         }
       ],
       [

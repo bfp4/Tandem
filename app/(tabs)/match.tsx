@@ -31,6 +31,17 @@ import {
 
 const DISTANCE_STEPS = [5, 10, 15, 25, 50, 100];
 
+/** Aggregate fields may be missing or non-numeric in Firestore snapshots. */
+function toStarRatingNumber(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function toRideCountNumber(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+}
+
 export default function MatchScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -195,7 +206,9 @@ export default function MatchScreen() {
     }
 
     if (selectedRating !== null) {
-      filtered = filtered.filter((r) => r.user.starRating >= selectedRating);
+      filtered = filtered.filter(
+        (r) => toStarRatingNumber(r.user.starRating) >= selectedRating,
+      );
     }
 
     setFilteredResults(filtered);
@@ -212,8 +225,8 @@ export default function MatchScreen() {
       params: {
         id: result.user.uid,
         name: result.user.name,
-        rating: result.user.starRating.toString(),
-        totalRides: result.user.rideCount.toString(),
+        rating: String(toStarRatingNumber(result.user.starRating)),
+        totalRides: String(toRideCountNumber(result.user.rideCount)),
         bio: result.user.bio ?? "",
         distance: result.distanceMiles.toFixed(1),
         score: Math.round(result.score * 100).toString(),
@@ -385,10 +398,10 @@ export default function MatchScreen() {
             <View style={styles.ratingRow}>
               <Ionicons name="star" size={14} color="#FFB800" />
               <Text style={styles.rating}>
-                {item.user.starRating.toFixed(1)}
+                {toStarRatingNumber(item.user.starRating).toFixed(1)}
               </Text>
               <Text style={styles.rideCount}>
-                ({item.user.rideCount} rides)
+                ({toRideCountNumber(item.user.rideCount)} rides)
               </Text>
             </View>
             <View style={styles.detailRow}>
@@ -841,6 +854,7 @@ const styles = StyleSheet.create({
   },
   matchInfo: {
     flex: 1,
+    minWidth: 0,
   },
   matchName: {
     fontSize: 17,
@@ -852,17 +866,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 4,
+    flexWrap: "wrap",
+    alignSelf: "flex-start",
   },
   rating: {
     fontSize: 14,
     fontWeight: "600",
     color: "#333",
     marginLeft: 4,
+    flexShrink: 0,
   },
   rideCount: {
     fontSize: 12,
     color: "#999",
     marginLeft: 4,
+    flexShrink: 0,
   },
   detailRow: {
     flexDirection: "row",

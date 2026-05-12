@@ -10,6 +10,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { signInWithEmail, signUpWithEmail } from '../services/authService';
 import { useRouter } from 'expo-router';
@@ -143,9 +144,13 @@ export default function LoginScreen() {
       <View style={styles.container}>
         <View style={styles.heroSection}>
           <View style={styles.logoContainer}>
-            <Ionicons name="car-sport" size={60} color="#007AFF" />
+            <Image
+              source={require('../assets/images/tandem-logo-light.png')}
+              style={styles.logoImage}
+              contentFit="contain"
+              accessibilityLabel="Tandem logo"
+            />
           </View>
-          <Text style={styles.appName}>Huber</Text>
           <Text style={styles.tagline}>Your ride, your way</Text>
         </View>
 
@@ -186,7 +191,7 @@ export default function LoginScreen() {
             {mode === 'login' ? 'Welcome back' : 'Create account'}
           </Text>
           <Text style={styles.formSubtitle}>
-            {mode === 'login' ? 'Sign in to continue' : 'Get started with Huber'}
+            {mode === 'login' ? 'Sign in to continue' : 'Get started with Tandem'}
           </Text>
 
           <TextInput
@@ -310,19 +315,15 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   logoContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 28,
-    backgroundColor: '#EBF4FF',
+    width: 260,
+    height: 120,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 12,
   },
-  appName: {
-    fontSize: 42,
-    fontWeight: '800',
-    color: '#111',
-    letterSpacing: -1,
+  logoImage: {
+    width: '100%',
+    height: '100%',
   },
   tagline: {
     fontSize: 16,

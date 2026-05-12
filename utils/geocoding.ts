@@ -18,7 +18,7 @@ export async function forwardGeocode(
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
-      { headers: { 'Accept-Language': 'en', 'User-Agent': 'HuberApp/1.0' } },
+      { headers: { 'Accept-Language': 'en', 'User-Agent': 'TandemApp/1.0' } },
     );
     const data = await res.json();
     if (!Array.isArray(data) || data.length === 0) {
@@ -50,7 +50,7 @@ export async function reverseGeocode(
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
-      { headers: { 'Accept-Language': 'en', 'User-Agent': 'HuberApp/1.0' } },
+      { headers: { 'Accept-Language': 'en', 'User-Agent': 'TandemApp/1.0' } },
     );
     const data = await res.json();
 
