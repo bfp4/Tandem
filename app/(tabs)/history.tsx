@@ -1,18 +1,26 @@
-import { useAuth } from '@/context/AuthContext';
-import { createNotification } from '@/services/notificationService';
-import { cancelRideRequest, confirmRideRequest, denyRideRequest } from '@/services/rideRequestService';
-import { createRiderRide, deleteRiderRide, getRiderRides } from '@/services/riderRideService';
-import { createScheduleBlock } from '@/services/scheduleBlockService';
-import { getUser } from '@/services/userService';
-import type { RideRequest } from '@/types/rideRequest';
-import type { RiderRide } from '@/types/riderRide';
-import type { ScheduleBlock } from '@/types/scheduleBlock';
-import type { User } from '@/types/user';
-import { calculateDriveTime, formatDriveTime } from '@/utils/driveTime';
-import { forwardGeocode } from '@/utils/geocoding';
-import { normalizeProfilePhotoUrl } from '@/utils/profilePhoto';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useAuth } from "@/context/AuthContext";
+import { createNotification } from "@/services/notificationService";
+import {
+  cancelRideRequest,
+  confirmRideRequest,
+  denyRideRequest,
+} from "@/services/rideRequestService";
+import {
+  createRiderRide,
+  deleteRiderRide,
+  getRiderRides,
+} from "@/services/riderRideService";
+import { createScheduleBlock } from "@/services/scheduleBlockService";
+import { getUser } from "@/services/userService";
+import type { RideRequest } from "@/types/rideRequest";
+import type { RiderRide } from "@/types/riderRide";
+import type { ScheduleBlock } from "@/types/scheduleBlock";
+import type { User } from "@/types/user";
+import { calculateDriveTime, formatDriveTime } from "@/utils/driveTime";
+import { forwardGeocode } from "@/utils/geocoding";
+import { normalizeProfilePhotoUrl } from "@/utils/profilePhoto";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import {
   collection,
   deleteDoc,
@@ -20,8 +28,8 @@ import {
   getDocs,
   query,
   where,
-} from 'firebase/firestore';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+} from "firebase/firestore";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -35,57 +43,85 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-} from 'react-native';
-import { db } from '../../config/firebase';
+} from "react-native";
+import { db } from "../../config/firebase";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const FULL_DAY: Record<string, string> = {
-  Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday',
-  Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday',
+  Mon: "Monday",
+  Tue: "Tuesday",
+  Wed: "Wednesday",
+  Thu: "Thursday",
+  Fri: "Friday",
+  Sat: "Saturday",
+  Sun: "Sunday",
 };
 const DAY_NUM: Record<number, string> = {
-  0: 'Sun', 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat',
+  0: "Sun",
+  1: "Mon",
+  2: "Tue",
+  3: "Wed",
+  4: "Thu",
+  5: "Fri",
+  6: "Sat",
 };
 
 const TIME_OPTIONS: string[] = [];
 for (let h = 0; h < 24; h++) {
   for (let m = 0; m < 60; m += 15) {
-    TIME_OPTIONS.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+    TIME_OPTIONS.push(
+      `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
+    );
   }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function format12h(hhmm: string): string {
-  const [h, m] = hhmm.split(':').map(Number);
-  const period = h < 12 ? 'AM' : 'PM';
+  const [h, m] = hhmm.split(":").map(Number);
+  const period = h < 12 ? "AM" : "PM";
   const hours = h % 12 === 0 ? 12 : h % 12;
-  return `${hours}:${String(m).padStart(2, '0')} ${period}`;
+  return `${hours}:${String(m).padStart(2, "0")} ${period}`;
 }
 
 function dayMatchesList(day: string, list: string[] | null): boolean {
   if (!list) return false;
-  return list.some(d => d.toLowerCase().startsWith(day.toLowerCase().slice(0, 3)));
+  return list.some((d) =>
+    d.toLowerCase().startsWith(day.toLowerCase().slice(0, 3)),
+  );
 }
 
 function blockMatchesDay(block: ScheduleBlock, day: string): boolean {
   if (block.repeating) return dayMatchesList(day, block.repeatDays);
-  if (block.date) return DAY_NUM[new Date(block.date + 'T00:00:00').getDay()] === day;
+  if (block.date)
+    return DAY_NUM[new Date(block.date + "T00:00:00").getDay()] === day;
   return false;
 }
 
 function rideRequestMatchesDay(r: RideRequest, day: string): boolean {
   if (r.repeating) return dayMatchesList(day, r.repeatDays);
-  return DAY_NUM[new Date(r.date + 'T00:00:00').getDay()] === day;
+  return DAY_NUM[new Date(r.date + "T00:00:00").getDay()] === day;
 }
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
-interface RiderRideWithId extends RiderRide { id: string }
-interface ScheduleBlockWithId extends ScheduleBlock { id: string }
-interface RideRequestWithId extends RideRequest { id: string }
+interface RiderRideWithId extends RiderRide {
+  id: string;
+}
+interface ScheduleBlockWithId extends ScheduleBlock {
+  id: string;
+}
+interface RideRequestWithId extends RideRequest {
+  id: string;
+}
+
+type PendingCancellation = {
+  requestId: string;
+  otherUserId: string;
+  riderRideId?: string;
+};
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -104,135 +140,203 @@ export default function ScheduleScreen() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   // Driver-side modal (driver responds to rider-initiated requests)
-  const [selectedRide, setSelectedRide] = useState<RideRequestWithId | null>(null);
+  const [selectedRide, setSelectedRide] = useState<RideRequestWithId | null>(
+    null,
+  );
   // Rider-side modal: detail sheet for a specific riderRide
-  const [selectedRiderRide, setSelectedRiderRide] = useState<RiderRideWithId | null>(null);
+  const [selectedRiderRide, setSelectedRiderRide] =
+    useState<RiderRideWithId | null>(null);
   // Rider-side modal (rider responds to driver-initiated requests)
-  const [selectedIncoming, setSelectedIncoming] = useState<RideRequestWithId | null>(null);
+  const [selectedIncoming, setSelectedIncoming] =
+    useState<RideRequestWithId | null>(null);
   const [actingOnRide, setActingOnRide] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
-  const [pendingCancellation, setPendingCancellation] = useState<{
-    requestId: string;
-    otherUserId: string;
-    riderRideId?: string;
-  } | null>(null);
-  const [cancellationStatus, setCancellationStatus] = useState<string>('');
+  const [pendingCancellation, setPendingCancellation] =
+    useState<PendingCancellation | null>(null);
+  const pendingCancellationRef = useRef<PendingCancellation | null>(null);
+  const [cancellationStatus, setCancellationStatus] = useState<string>("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [pendingDeletion, setPendingDeletion] = useState<string | null>(null);
 
   // Rider: incoming match requests from drivers and confirmed requests
-  const [incomingRequests, setIncomingRequests] = useState<RideRequestWithId[]>([]);
-  const [confirmedRiderRequests, setConfirmedRiderRequests] = useState<RideRequestWithId[]>([]);
-  const [requestDrivers, setRequestDrivers] = useState<Record<string, User>>({});
+  const [incomingRequests, setIncomingRequests] = useState<RideRequestWithId[]>(
+    [],
+  );
+  const [confirmedRiderRequests, setConfirmedRiderRequests] = useState<
+    RideRequestWithId[]
+  >([]);
+  const [requestDrivers, setRequestDrivers] = useState<Record<string, User>>(
+    {},
+  );
 
   // ── Rider form ──
-  const [ridePickup, setRidePickup] = useState('');
-  const [rideDropoff, setRideDropoff] = useState('');
-  const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [dropoffCoords, setDropoffCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [rideDepartureTime, setRideDepartureTime] = useState('08:00');
+  const [ridePickup, setRidePickup] = useState("");
+  const [rideDropoff, setRideDropoff] = useState("");
+  const [pickupCoords, setPickupCoords] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const [dropoffCoords, setDropoffCoords] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const [rideDepartureTime, setRideDepartureTime] = useState("08:00");
   const [rideDays, setRideDays] = useState<string[]>([]);
   const [showDepartureDropdown, setShowDepartureDropdown] = useState(false);
 
   // ── Driver form ──
   const [availDays, setAvailDays] = useState<string[]>([]);
-  const [availStartTime, setAvailStartTime] = useState('08:00');
-  const [availEndTime, setAvailEndTime] = useState('17:00');
+  const [availStartTime, setAvailStartTime] = useState("08:00");
+  const [availEndTime, setAvailEndTime] = useState("17:00");
   const [showStartDropdown, setShowStartDropdown] = useState(false);
   const [showEndDropdown, setShowEndDropdown] = useState(false);
 
-  useEffect(() => { loadAll(); }, [user]);
-
-  const loadAll = useCallback(async (isRefresh = false) => {
-    if (!user) return;
-    if (!isRefresh) setLoading(true);
-    try {
-      const profile = await getUser(user.uid);
-      setUserProfile(profile);
-
-      if (profile.activeRole === 'rider') {
-        const [ridesResult, requestsSnap] = await Promise.all([
-          getRiderRides(user.uid),
-          getDocs(query(collection(db, 'rideRequests'), where('riderId', '==', user.uid))),
-        ]);
-        setRiderRides(ridesResult);
-
-        const allRequests: RideRequestWithId[] = requestsSnap.docs
-          .map(d => ({ ...(d.data() as RideRequest), id: d.id }));
-
-        const incoming = allRequests.filter(r => r.initiatedBy === 'driver' && r.status === 'pending');
-        const confirmed = allRequests.filter(r => r.status === 'confirmed');
-        setIncomingRequests(incoming);
-        setConfirmedRiderRequests(confirmed);
-
-        const allDriverIds = [...new Set([...incoming, ...confirmed].map(r => r.driverId))];
-        const driverProfiles: Record<string, User> = {};
-        await Promise.all(allDriverIds.map(async id => {
-          try { driverProfiles[id] = await getUser(id); } catch {}
-        }));
-        setRequestDrivers(driverProfiles);
-      } else {
-        const [blocksSnap, pendingSnap, confirmedSnap] = await Promise.all([
-          getDocs(query(
-            collection(db, 'scheduleBlocks'),
-            where('userId', '==', user.uid),
-            where('role', '==', 'driver'),
-            where('status', '==', 'open'),
-          )),
-          getDocs(query(
-            collection(db, 'rideRequests'),
-            where('driverId', '==', user.uid),
-            where('status', '==', 'pending'),
-          )),
-          getDocs(query(
-            collection(db, 'rideRequests'),
-            where('driverId', '==', user.uid),
-            where('status', '==', 'confirmed'),
-          )),
-        ]);
-
-        setDriverBlocks(
-          blocksSnap.docs.map(d => ({ ...(d.data() as ScheduleBlock), id: d.id })),
-        );
-
-        const allRides: RideRequestWithId[] = [
-          ...pendingSnap.docs.map(d => ({ ...(d.data() as RideRequest), id: d.id })),
-          ...confirmedSnap.docs.map(d => ({ ...(d.data() as RideRequest), id: d.id })),
-        ];
-        setDriverRides(allRides);
-
-        const riderIds = [...new Set(allRides.map(r => r.riderId))];
-        const profiles: Record<string, User> = {};
-        await Promise.all(
-          riderIds.map(async id => {
-            try { profiles[id] = await getUser(id); } catch {}
-          }),
-        );
-        setOtherUsers(profiles);
-      }
-    } catch (e) {
-      console.error('Error loading schedule:', e);
-    } finally {
-      if (!isRefresh) setLoading(false);
-    }
+  useEffect(() => {
+    loadAll();
   }, [user]);
+
+  const loadAll = useCallback(
+    async (isRefresh = false) => {
+      if (!user) return;
+      if (!isRefresh) setLoading(true);
+      try {
+        const profile = await getUser(user.uid);
+        setUserProfile(profile);
+
+        if (profile.activeRole === "rider") {
+          const [ridesResult, requestsSnap] = await Promise.all([
+            getRiderRides(user.uid),
+            getDocs(
+              query(
+                collection(db, "rideRequests"),
+                where("riderId", "==", user.uid),
+              ),
+            ),
+          ]);
+          setRiderRides(ridesResult);
+
+          const allRequests: RideRequestWithId[] = requestsSnap.docs.map(
+            (d) => ({ ...(d.data() as RideRequest), id: d.id }),
+          );
+
+          const incoming = allRequests.filter(
+            (r) => r.initiatedBy === "driver" && r.status === "pending",
+          );
+          const confirmed = allRequests.filter((r) => r.status === "confirmed");
+          setIncomingRequests(incoming);
+          setConfirmedRiderRequests(confirmed);
+
+          const allDriverIds = [
+            ...new Set([...incoming, ...confirmed].map((r) => r.driverId)),
+          ];
+          const driverProfiles: Record<string, User> = {};
+          await Promise.all(
+            allDriverIds.map(async (id) => {
+              try {
+                driverProfiles[id] = await getUser(id);
+              } catch {}
+            }),
+          );
+          setRequestDrivers(driverProfiles);
+        } else {
+          const [blocksSnap, pendingSnap, confirmedSnap] = await Promise.all([
+            getDocs(
+              query(
+                collection(db, "scheduleBlocks"),
+                where("userId", "==", user.uid),
+                where("role", "==", "driver"),
+                where("status", "==", "open"),
+              ),
+            ),
+            getDocs(
+              query(
+                collection(db, "rideRequests"),
+                where("driverId", "==", user.uid),
+                where("status", "==", "pending"),
+              ),
+            ),
+            getDocs(
+              query(
+                collection(db, "rideRequests"),
+                where("driverId", "==", user.uid),
+                where("status", "==", "confirmed"),
+              ),
+            ),
+          ]);
+
+          setDriverBlocks(
+            blocksSnap.docs.map((d) => ({
+              ...(d.data() as ScheduleBlock),
+              id: d.id,
+            })),
+          );
+
+          const allRides: RideRequestWithId[] = [
+            ...pendingSnap.docs.map((d) => ({
+              ...(d.data() as RideRequest),
+              id: d.id,
+            })),
+            ...confirmedSnap.docs.map((d) => ({
+              ...(d.data() as RideRequest),
+              id: d.id,
+            })),
+          ];
+          setDriverRides(allRides);
+
+          const riderIds = [...new Set(allRides.map((r) => r.riderId))];
+          const profiles: Record<string, User> = {};
+          await Promise.all(
+            riderIds.map(async (id) => {
+              try {
+                profiles[id] = await getUser(id);
+              } catch {}
+            }),
+          );
+          setOtherUsers(profiles);
+        }
+      } catch (e) {
+        console.error("Error loading schedule:", e);
+      } finally {
+        if (!isRefresh) setLoading(false);
+      }
+    },
+    [user],
+  );
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   const resetForms = () => {
-    setRidePickup(''); setRideDropoff('');
-    setPickupCoords(null); setDropoffCoords(null);
-    setRideDepartureTime('08:00'); setRideDays([]);
+    setRidePickup("");
+    setRideDropoff("");
+    setPickupCoords(null);
+    setDropoffCoords(null);
+    setRideDepartureTime("08:00");
+    setRideDays([]);
     setShowDepartureDropdown(false);
     setAvailDays([]);
-    setAvailStartTime('08:00'); setAvailEndTime('17:00');
-    setShowStartDropdown(false); setShowEndDropdown(false);
+    setAvailStartTime("08:00");
+    setAvailEndTime("17:00");
+    setShowStartDropdown(false);
+    setShowEndDropdown(false);
   };
 
-  const closeAddModal = () => { if (!submitting) { setShowAddModal(false); resetForms(); } };
+  const closeAddModal = () => {
+    if (!submitting) {
+      setShowAddModal(false);
+      resetForms();
+    }
+  };
 
-  const toggleFormDay = (day: string, current: string[], setter: (v: string[]) => void) => {
-    setter(current.includes(day) ? current.filter(d => d !== day) : [...current, day]);
+  const toggleFormDay = (
+    day: string,
+    current: string[],
+    setter: (v: string[]) => void,
+  ) => {
+    setter(
+      current.includes(day)
+        ? current.filter((d) => d !== day)
+        : [...current, day],
+    );
   };
 
   // ── Submit: add ride (rider) ───────────────────────────────────────────────
@@ -240,21 +344,31 @@ export default function ScheduleScreen() {
   const handleAddRide = async () => {
     if (!user) return;
     if (!ridePickup.trim() || !rideDropoff.trim()) {
-      Alert.alert('Missing info', 'Please enter both pickup and dropoff addresses.');
+      Alert.alert(
+        "Missing info",
+        "Please enter both pickup and dropoff addresses.",
+      );
       return;
     }
     if (rideDays.length === 0) {
-      Alert.alert('Missing info', 'Please select at least one day.');
+      Alert.alert("Missing info", "Please select at least one day.");
       return;
     }
     setSubmitting(true);
     try {
       const [resolvedPickup, resolvedDropoff] = await Promise.all([
-        pickupCoords ? Promise.resolve(pickupCoords) : forwardGeocode(ridePickup.trim()),
-        dropoffCoords ? Promise.resolve(dropoffCoords) : forwardGeocode(rideDropoff.trim()),
+        pickupCoords
+          ? Promise.resolve(pickupCoords)
+          : forwardGeocode(ridePickup.trim()),
+        dropoffCoords
+          ? Promise.resolve(dropoffCoords)
+          : forwardGeocode(rideDropoff.trim()),
       ]);
       if (!resolvedPickup || !resolvedDropoff) {
-        Alert.alert('Address not found', 'Could not locate one or both addresses. Try adding a city or zip code.');
+        Alert.alert(
+          "Address not found",
+          "Could not locate one or both addresses. Try adding a city or zip code.",
+        );
         return;
       }
       const durationMinutes = await calculateDriveTime(
@@ -265,8 +379,10 @@ export default function ScheduleScreen() {
         userId: user.uid,
         pickupAddress: ridePickup.trim(),
         dropoffAddress: rideDropoff.trim(),
-        pickupLat: resolvedPickup.lat, pickupLng: resolvedPickup.lng,
-        dropoffLat: resolvedDropoff.lat, dropoffLng: resolvedDropoff.lng,
+        pickupLat: resolvedPickup.lat,
+        pickupLng: resolvedPickup.lng,
+        dropoffLat: resolvedDropoff.lat,
+        dropoffLng: resolvedDropoff.lng,
         departureTime: rideDepartureTime,
         repeating: true,
         repeatDays: rideDays,
@@ -275,7 +391,7 @@ export default function ScheduleScreen() {
       closeAddModal();
       await loadAll(true);
     } catch (e: any) {
-      Alert.alert('Error', e.message ?? 'Could not add ride.');
+      Alert.alert("Error", e.message ?? "Could not add ride.");
     } finally {
       setSubmitting(false);
     }
@@ -285,21 +401,34 @@ export default function ScheduleScreen() {
 
   const handleAddAvailability = async () => {
     if (!user) return;
-    if (availDays.length === 0) { Alert.alert('Missing info', 'Please select at least one day.'); return; }
-    if (availStartTime >= availEndTime) { Alert.alert('Invalid time', 'End time must be after start time.'); return; }
+    if (availDays.length === 0) {
+      Alert.alert("Missing info", "Please select at least one day.");
+      return;
+    }
+    if (availStartTime >= availEndTime) {
+      Alert.alert("Invalid time", "End time must be after start time.");
+      return;
+    }
     setSubmitting(true);
     try {
       await createScheduleBlock({
-        userId: user.uid, role: 'driver', date: null,
-        startTime: availStartTime, endTime: availEndTime,
-        status: 'open', repeating: true,
+        userId: user.uid,
+        role: "driver",
+        date: null,
+        startTime: availStartTime,
+        endTime: availEndTime,
+        status: "open",
+        repeating: true,
         repeatDays: availDays,
-        repeatEndsAt: null, seriesId: null, expiresAt: null, parentBlockId: null,
+        repeatEndsAt: null,
+        seriesId: null,
+        expiresAt: null,
+        parentBlockId: null,
       });
       closeAddModal();
       await loadAll(true);
     } catch (e: any) {
-      Alert.alert('Error', e.message ?? 'Could not save availability.');
+      Alert.alert("Error", e.message ?? "Could not save availability.");
     } finally {
       setSubmitting(false);
     }
@@ -321,23 +450,26 @@ export default function ScheduleScreen() {
       await loadAll(true);
       setSelectedRiderRide(null);
       setPendingDeletion(null);
-    } catch (e: any) { 
-      Alert.alert('Error', e.message); 
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
     } finally {
       setActingOnRide(false);
     }
   };
 
   const handleDeleteBlock = (blockId: string) => {
-    Alert.alert('Remove Availability', 'Remove this availability window?', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert("Remove Availability", "Remove this availability window?", [
+      { text: "Cancel", style: "cancel" },
       {
-        text: 'Remove', style: 'destructive',
+        text: "Remove",
+        style: "destructive",
         onPress: async () => {
           try {
-            await deleteDoc(doc(db, 'scheduleBlocks', blockId));
-            setDriverBlocks(prev => prev.filter(b => b.id !== blockId));
-          } catch (e: any) { Alert.alert('Error', e.message); }
+            await deleteDoc(doc(db, "scheduleBlocks", blockId));
+            setDriverBlocks((prev) => prev.filter((b) => b.id !== blockId));
+          } catch (e: any) {
+            Alert.alert("Error", e.message);
+          }
         },
       },
     ]);
@@ -349,16 +481,22 @@ export default function ScheduleScreen() {
     setActingOnRide(true);
     try {
       await confirmRideRequest(requestId);
-      await createNotification(notifyUserId, 'ride_confirmed', requestId, 'Your ride request has been accepted!');
+      await createNotification(
+        notifyUserId,
+        "ride_confirmed",
+        requestId,
+        "Your ride request has been accepted!",
+      );
       await loadAll(true);
       // Use InteractionManager to schedule modal close after state updates are processed
       InteractionManager.runAfterInteractions(() => {
         setSelectedRide(null);
         setSelectedIncoming(null);
+        setSelectedRiderRide(null);
         setActingOnRide(false);
       });
     } catch (e: any) {
-      Alert.alert('Error', e.message ?? 'Could not accept the request.');
+      Alert.alert("Error", e.message ?? "Could not accept the request.");
       setActingOnRide(false);
     }
   };
@@ -367,95 +505,157 @@ export default function ScheduleScreen() {
     setActingOnRide(true);
     try {
       await denyRideRequest(requestId);
-      await createNotification(notifyUserId, 'ride_denied', requestId, 'Your ride request was declined.');
+      await createNotification(
+        notifyUserId,
+        "ride_denied",
+        requestId,
+        "Your ride request was declined.",
+      );
       await loadAll(true);
       // Use InteractionManager to schedule modal close after state updates are processed
       InteractionManager.runAfterInteractions(() => {
         setSelectedRide(null);
         setSelectedIncoming(null);
+        setSelectedRiderRide(null);
         setActingOnRide(false);
       });
     } catch (e: any) {
-      Alert.alert('Error', e.message ?? 'Could not deny the request.');
+      Alert.alert("Error", e.message ?? "Could not deny the request.");
       setActingOnRide(false);
     }
   };
 
-  const handleCancelRideRequest = async (requestId: string, otherUserId: string, riderRideId?: string) => {
-    setPendingCancellation({ requestId, otherUserId, riderRideId });
+  const handleCancelRideRequest = (
+    requestId: string,
+    otherUserId: string,
+    riderRideId?: string,
+  ) => {
+    const payload: PendingCancellation = {
+      requestId,
+      otherUserId,
+      riderRideId,
+    };
+    pendingCancellationRef.current = payload;
+    setPendingCancellation(payload);
+
+    // Nested Modal + Modal breaks touch handling on native; use system alert instead.
+    if (Platform.OS !== "web") {
+      Alert.alert(
+        "Cancel Ride",
+        "This will cancel your confirmed ride. Are you sure?",
+        [
+          {
+            text: "Keep Ride",
+            style: "cancel",
+            onPress: () => {
+              pendingCancellationRef.current = null;
+              setPendingCancellation(null);
+            },
+          },
+          {
+            text: "Cancel Ride",
+            style: "destructive",
+            onPress: () => void runCancellation(payload),
+          },
+        ],
+      );
+      return;
+    }
+
     setShowCancelConfirm(true);
   };
 
-  const executeCancellation = async () => {
-    setCancellationStatus('Button clicked!');
-    if (!pendingCancellation) {
-      setCancellationStatus('Error: No pending cancellation');
+  const runCancellation = async (payload: PendingCancellation | null) => {
+    setCancellationStatus("Button clicked!");
+    if (!payload) {
+      setCancellationStatus("Error: No pending cancellation");
       return;
     }
-    
-    const { requestId, otherUserId, riderRideId } = pendingCancellation;
-    console.log('🔥 Starting cancellation:', { requestId, otherUserId, riderRideId });
-    setCancellationStatus('Starting cancellation...');
+
+    const { requestId, otherUserId, riderRideId } = payload;
+    console.log("🔥 Starting cancellation:", {
+      requestId,
+      otherUserId,
+      riderRideId,
+    });
+    setCancellationStatus("Starting cancellation...");
     setShowCancelConfirm(false);
     setActingOnRide(true);
-    
+
     try {
-      console.log('Step 1: Cancelling ride request...');
-      setCancellationStatus('Step 1/4: Cancelling request...');
+      console.log("Step 1: Cancelling ride request...");
+      setCancellationStatus("Step 1/4: Cancelling request...");
       await cancelRideRequest(requestId, user?.uid);
-      console.log('✅ Ride request cancelled');
-      
-      console.log('Step 2: Creating notification...');
-      setCancellationStatus('Step 2/4: Sending notification...');
-      await createNotification(otherUserId, 'ride_cancelled', requestId, 'A ride has been cancelled.');
-      console.log('✅ Notification sent');
-      
-      if (riderRideId && userProfile?.activeRole === 'rider') {
-        console.log('Step 3: Deleting rider ride:', riderRideId);
-        setCancellationStatus('Step 3/4: Deleting ride...');
+      console.log("✅ Ride request cancelled");
+
+      console.log("Step 2: Creating notification...");
+      setCancellationStatus("Step 2/4: Sending notification...");
+      await createNotification(
+        otherUserId,
+        "ride_cancelled",
+        requestId,
+        "A ride has been cancelled.",
+      );
+      console.log("✅ Notification sent");
+
+      if (riderRideId && userProfile?.activeRole === "rider") {
+        console.log("Step 3: Deleting rider ride:", riderRideId);
+        setCancellationStatus("Step 3/4: Deleting ride...");
         await deleteRiderRide(riderRideId);
-        console.log('✅ Rider ride deleted');
+        console.log("✅ Rider ride deleted");
       } else {
-        console.log('⚠️ Skipping rider ride deletion. riderRideId:', riderRideId, 'role:', userProfile?.activeRole);
-        setCancellationStatus('Step 3/4: Skipped (no riderRideId)');
+        console.log(
+          "⚠️ Skipping rider ride deletion. riderRideId:",
+          riderRideId,
+          "role:",
+          userProfile?.activeRole,
+        );
+        setCancellationStatus("Step 3/4: Skipped (no riderRideId)");
       }
-      
-      console.log('Step 4: Refreshing data and closing modals...');
-      setCancellationStatus('Step 4/4: Refreshing...');
-      
+
+      console.log("Step 4: Refreshing data and closing modals...");
+      setCancellationStatus("Step 4/4: Refreshing...");
+
       await loadAll(true);
-      console.log('✅ Data refreshed. Closing modals...');
+      console.log("✅ Data refreshed. Closing modals...");
       setSelectedRide(null);
       setSelectedRiderRide(null);
+      pendingCancellationRef.current = null;
       setPendingCancellation(null);
-      setCancellationStatus('Complete!');
-      setTimeout(() => setCancellationStatus(''), 2000);
+      setCancellationStatus("Complete!");
+      setTimeout(() => setCancellationStatus(""), 2000);
     } catch (e: any) {
-      console.error('Error during cancellation:', e);
-      console.error('Error message:', e.message);
-      console.error('Error stack:', e.stack);
-      setCancellationStatus('Error: ' + e.message);
-      Alert.alert('Error', e.message ?? 'Could not cancel the ride.');
+      console.error("Error during cancellation:", e);
+      console.error("Error message:", e.message);
+      console.error("Error stack:", e.stack);
+      setCancellationStatus("Error: " + e.message);
+      Alert.alert("Error", e.message ?? "Could not cancel the ride.");
     } finally {
       setActingOnRide(false);
-      console.log('🔥 Cancellation process finished');
+      console.log("🔥 Cancellation process finished");
     }
+  };
+
+  const executeCancellation = () => {
+    const payload =
+      pendingCancellationRef.current ?? pendingCancellation;
+    void runCancellation(payload);
   };
 
   const handleViewUserPage = (otherUser: User) => {
     router.push({
-      pathname: '../driver-details' as any,
+      pathname: "../driver-details" as any,
       params: {
         id: otherUser.uid,
         name: otherUser.name,
         rating: (otherUser.starRating ?? 0).toString(),
         totalRides: (otherUser.rideCount ?? 0).toString(),
-        bio: otherUser.bio ?? '',
+        bio: otherUser.bio ?? "",
         profilePhoto: normalizeProfilePhotoUrl(otherUser.profilePhoto),
-        distance: '0',
-        score: '0',
-        matchingRides: '[]',
-        myRole: userProfile?.activeRole ?? 'rider',
+        distance: "0",
+        score: "0",
+        matchingRides: "[]",
+        myRole: userProfile?.activeRole ?? "rider",
       },
     });
   };
@@ -470,42 +670,56 @@ export default function ScheduleScreen() {
     );
   }
 
-  const isRider = userProfile?.activeRole === 'rider';
+  const isRider = userProfile?.activeRole === "rider";
 
   return (
     <View style={styles.container}>
-
       {/* Debug Status Banner */}
       {cancellationStatus && (
-        <View style={{ backgroundColor: '#FF9500', padding: 10, alignItems: 'center' }}>
-          <Text style={{ color: '#fff', fontWeight: 'bold' }}>{cancellationStatus}</Text>
+        <View
+          style={{
+            backgroundColor: "#FF9500",
+            padding: 10,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: "#fff", fontWeight: "bold" }}>
+            {cancellationStatus}
+          </Text>
         </View>
       )}
 
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Schedule</Text>
-        <TouchableOpacity style={styles.addButton} onPress={() => setShowAddModal(true)}>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => setShowAddModal(true)}
+        >
           <Ionicons name="add" size={22} color="#fff" />
         </TouchableOpacity>
       </View>
 
       {/* Day accordion */}
       <ScrollView contentContainerStyle={styles.listContent}>
-        {DAYS.map(day => {
-          const dayBlocks = isRider ? [] : driverBlocks.filter(b => blockMatchesDay(b, day));
+        {DAYS.map((day) => {
+          const dayBlocks = isRider
+            ? []
+            : driverBlocks.filter((b) => blockMatchesDay(b, day));
           const dayRequests = isRider
             ? []
             : driverRides
-                .filter(r => rideRequestMatchesDay(r, day))
-                .sort((a, b) => a.requestedStart.localeCompare(b.requestedStart));
+                .filter((r) => rideRequestMatchesDay(r, day))
+                .sort((a, b) =>
+                  a.requestedStart.localeCompare(b.requestedStart),
+                );
           const dayRides = isRider
             ? riderRides
-                .filter(r => r.repeatDays.includes(day))
+                .filter((r) => r.repeatDays.includes(day))
                 .sort((a, b) => a.departureTime.localeCompare(b.departureTime))
             : [];
-          const dayIncoming = incomingRequests.filter(r =>
-            dayRides.some(ride => ride.id === r.riderRideId),
+          const dayIncoming = incomingRequests.filter((r) =>
+            dayRides.some((ride) => ride.id === r.riderRideId),
           );
 
           return (
@@ -513,9 +727,13 @@ export default function ScheduleScreen() {
               key={day}
               day={day}
               isOpen={openDay === day}
-              onToggle={() => setOpenDay(prev => prev === day ? null : day)}
+              onToggle={() => setOpenDay((prev) => (prev === day ? null : day))}
               hasAvailability={dayBlocks.length > 0}
-              hasRides={dayRequests.length > 0 || dayRides.length > 0 || dayIncoming.length > 0}
+              hasRides={
+                dayRequests.length > 0 ||
+                dayRides.length > 0 ||
+                dayIncoming.length > 0
+              }
             >
               {isRider ? (
                 <RiderDayContent
@@ -548,22 +766,29 @@ export default function ScheduleScreen() {
         onRequestClose={closeAddModal}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.modalOverlay}
         >
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={closeAddModal} />
+          <TouchableOpacity
+            style={{ flex: 1 }}
+            activeOpacity={1}
+            onPress={closeAddModal}
+          />
           <View style={styles.modalSheet}>
             <View style={styles.sheetHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {isRider ? 'Add Ride' : 'Add Availability'}
+                {isRider ? "Add Ride" : "Add Availability"}
               </Text>
               <TouchableOpacity onPress={closeAddModal}>
                 <Ionicons name="close" size={26} color="#333" />
               </TouchableOpacity>
             </View>
 
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
               {isRider ? (
                 <RiderForm
                   pickup={ridePickup}
@@ -574,10 +799,22 @@ export default function ScheduleScreen() {
                   showDepartureDropdown={showDepartureDropdown}
                   setShowDepartureDropdown={setShowDepartureDropdown}
                   onToggleDay={(d) => toggleFormDay(d, rideDays, setRideDays)}
-                  onPickupChange={(t) => { setRidePickup(t); setPickupCoords(null); }}
-                  onPickupSelect={(a, lat, lng) => { setRidePickup(a); setPickupCoords({ lat, lng }); }}
-                  onDropoffChange={(t) => { setRideDropoff(t); setDropoffCoords(null); }}
-                  onDropoffSelect={(a, lat, lng) => { setRideDropoff(a); setDropoffCoords({ lat, lng }); }}
+                  onPickupChange={(t) => {
+                    setRidePickup(t);
+                    setPickupCoords(null);
+                  }}
+                  onPickupSelect={(a, lat, lng) => {
+                    setRidePickup(a);
+                    setPickupCoords({ lat, lng });
+                  }}
+                  onDropoffChange={(t) => {
+                    setRideDropoff(t);
+                    setDropoffCoords(null);
+                  }}
+                  onDropoffSelect={(a, lat, lng) => {
+                    setRideDropoff(a);
+                    setDropoffCoords({ lat, lng });
+                  }}
                 />
               ) : (
                 <DriverForm
@@ -587,15 +824,24 @@ export default function ScheduleScreen() {
                   endTime={availEndTime}
                   setEndTime={setAvailEndTime}
                   showStartDropdown={showStartDropdown}
-                  setShowStartDropdown={(v) => { setShowStartDropdown(v); if (v) setShowEndDropdown(false); }}
+                  setShowStartDropdown={(v) => {
+                    setShowStartDropdown(v);
+                    if (v) setShowEndDropdown(false);
+                  }}
                   showEndDropdown={showEndDropdown}
-                  setShowEndDropdown={(v) => { setShowEndDropdown(v); if (v) setShowStartDropdown(false); }}
+                  setShowEndDropdown={(v) => {
+                    setShowEndDropdown(v);
+                    if (v) setShowStartDropdown(false);
+                  }}
                   onToggleDay={(d) => toggleFormDay(d, availDays, setAvailDays)}
                 />
               )}
 
               <TouchableOpacity
-                style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+                style={[
+                  styles.submitButton,
+                  submitting && styles.submitButtonDisabled,
+                ]}
                 onPress={isRider ? handleAddRide : handleAddAvailability}
                 disabled={submitting}
               >
@@ -605,7 +851,7 @@ export default function ScheduleScreen() {
                   <>
                     <Ionicons name="checkmark-circle" size={20} color="#fff" />
                     <Text style={styles.submitButtonText}>
-                      {isRider ? 'Add Ride' : 'Save Availability'}
+                      {isRider ? "Add Ride" : "Save Availability"}
                     </Text>
                   </>
                 )}
@@ -620,122 +866,191 @@ export default function ScheduleScreen() {
         visible={selectedRide !== null}
         transparent
         animationType="slide"
-        onRequestClose={() => { if (!actingOnRide) setSelectedRide(null); }}
+        onRequestClose={() => {
+          if (!actingOnRide) setSelectedRide(null);
+        }}
       >
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={{ flex: 1 }}
             activeOpacity={1}
-            onPress={() => { if (!actingOnRide) setSelectedRide(null); }}
+            onPress={() => {
+              if (!actingOnRide) setSelectedRide(null);
+            }}
           />
           <View style={styles.modalSheet}>
             <View style={styles.sheetHandle} />
-            {selectedRide && (() => {
-              const ride = selectedRide;
-              const riderName = otherUsers[ride.riderId]?.name ?? 'Rider';
-              const isPending = ride.status === 'pending';
-              // Driver initiated this request — they're waiting for the rider
-              const awaitingRider = isPending && ride.initiatedBy === 'driver';
-              return (
-                <>
-                  <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>
-                      {isPending ? 'Ride Request' : 'Confirmed Ride'}
-                    </Text>
-                    <TouchableOpacity onPress={() => setSelectedRide(null)} disabled={actingOnRide}>
-                      <Ionicons name="close" size={26} color="#333" />
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Ionicons name="person-circle-outline" size={20} color="#636366" />
-                    <Text style={styles.detailText}>Rider: {riderName}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Ionicons name="calendar-outline" size={20} color="#636366" />
-                    <Text style={styles.detailText}>Date: {ride.date}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Ionicons name="time-outline" size={20} color="#636366" />
-                    <Text style={styles.detailText}>
-                      {format12h(ride.requestedStart)} – {format12h(ride.requestedEnd)}
-                    </Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Ionicons name="ellipse-outline" size={20} color="#636366" />
-                    <Text style={[
-                      styles.detailText,
-                      { color: isPending ? '#FF9500' : '#34C759', fontWeight: '600' },
-                    ]}>
-                      {awaitingRider
-                        ? 'Awaiting rider response'
-                        : isPending ? 'Pending your response' : 'Confirmed'}
-                    </Text>
-                  </View>
-
-                  {/* View Rider's Page button */}
-                  {(() => {
-                    const riderUser = otherUsers[ride.riderId];
-                    return riderUser ? (
+            {selectedRide &&
+              (() => {
+                const ride = selectedRide;
+                const riderName = otherUsers[ride.riderId]?.name ?? "Rider";
+                const isPending = ride.status === "pending";
+                // Driver initiated this request — they're waiting for the rider
+                const awaitingRider =
+                  isPending && ride.initiatedBy === "driver";
+                return (
+                  <>
+                    <View style={styles.modalHeader}>
+                      <Text style={styles.modalTitle}>
+                        {isPending ? "Ride Request" : "Confirmed Ride"}
+                      </Text>
                       <TouchableOpacity
-                        style={styles.viewProfileButton}
-                        onPress={() => { setSelectedRide(null); handleViewUserPage(riderUser); }}
-                      >
-                        <Ionicons name="person-circle-outline" size={18} color="#007AFF" />
-                        <Text style={styles.viewProfileText}>View Rider's Page</Text>
-                      </TouchableOpacity>
-                    ) : null;
-                  })()}
-
-                  {isPending && !awaitingRider ? (
-                    <View style={styles.actionRow}>
-                      <TouchableOpacity
-                        style={[styles.denyButton, actingOnRide && styles.actionDisabled]}
-                        onPress={() => handleDenyRide(ride.id, ride.riderId)}
+                        onPress={() => setSelectedRide(null)}
                         disabled={actingOnRide}
                       >
-                        {actingOnRide
-                          ? <ActivityIndicator color="#fff" size="small" />
-                          : <Text style={styles.actionText}>Deny</Text>}
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.acceptButton, actingOnRide && styles.actionDisabled]}
-                        onPress={() => handleAcceptRide(ride.id, ride.riderId)}
-                        disabled={actingOnRide}
-                      >
-                        {actingOnRide
-                          ? <ActivityIndicator color="#fff" size="small" />
-                          : <Text style={styles.actionText}>Accept</Text>}
+                        <Ionicons name="close" size={26} color="#333" />
                       </TouchableOpacity>
                     </View>
-                  ) : !isPending ? (
-                    <>
-                      <View style={styles.confirmedBadge}>
-                        <Ionicons name="checkmark-circle" size={18} color="#34C759" />
-                        <Text style={styles.confirmedText}>Ride confirmed</Text>
-                      </View>
-                      <TouchableOpacity
-                        style={[styles.denyButton, { marginTop: 12 }, actingOnRide && styles.actionDisabled]}
-                        onPress={() => {
-                          console.log('🔵 Cancel Ride button pressed (driver modal)', { 
-                            rideId: ride.id, 
-                            riderId: ride.riderId, 
-                            riderRideId: ride.riderRideId,
-                            actingOnRide,
-                          });
-                          handleCancelRideRequest(ride.id, ride.riderId, ride.riderRideId);
-                        }}
-                        disabled={actingOnRide}
+
+                    <View style={styles.detailRow}>
+                      <Ionicons
+                        name="person-circle-outline"
+                        size={20}
+                        color="#636366"
+                      />
+                      <Text style={styles.detailText}>Rider: {riderName}</Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Ionicons
+                        name="calendar-outline"
+                        size={20}
+                        color="#636366"
+                      />
+                      <Text style={styles.detailText}>Date: {ride.date}</Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Ionicons name="time-outline" size={20} color="#636366" />
+                      <Text style={styles.detailText}>
+                        {format12h(ride.requestedStart)} –{" "}
+                        {format12h(ride.requestedEnd)}
+                      </Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Ionicons
+                        name="ellipse-outline"
+                        size={20}
+                        color="#636366"
+                      />
+                      <Text
+                        style={[
+                          styles.detailText,
+                          {
+                            color: isPending ? "#FF9500" : "#34C759",
+                            fontWeight: "600",
+                          },
+                        ]}
                       >
-                        {actingOnRide
-                          ? <ActivityIndicator color="#fff" size="small" />
-                          : <Text style={styles.actionText}>Cancel Ride</Text>}
-                      </TouchableOpacity>
-                    </>
-                  ) : null}
-                </>
-              );
-            })()}
+                        {awaitingRider
+                          ? "Awaiting rider response"
+                          : isPending
+                            ? "Pending your response"
+                            : "Confirmed"}
+                      </Text>
+                    </View>
+
+                    {/* View Rider's Page button */}
+                    {(() => {
+                      const riderUser = otherUsers[ride.riderId];
+                      return riderUser ? (
+                        <TouchableOpacity
+                          style={styles.viewProfileButton}
+                          onPress={() => {
+                            setSelectedRide(null);
+                            handleViewUserPage(riderUser);
+                          }}
+                        >
+                          <Ionicons
+                            name="person-circle-outline"
+                            size={18}
+                            color="#007AFF"
+                          />
+                          <Text style={styles.viewProfileText}>
+                            View Rider's Page
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null;
+                    })()}
+
+                    {isPending && !awaitingRider ? (
+                      <View style={styles.actionRow}>
+                        <TouchableOpacity
+                          style={[
+                            styles.denyButton,
+                            actingOnRide && styles.actionDisabled,
+                          ]}
+                          onPress={() => handleDenyRide(ride.id, ride.riderId)}
+                          disabled={actingOnRide}
+                        >
+                          {actingOnRide ? (
+                            <ActivityIndicator color="#fff" size="small" />
+                          ) : (
+                            <Text style={styles.actionText}>Deny</Text>
+                          )}
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.acceptButton,
+                            actingOnRide && styles.actionDisabled,
+                          ]}
+                          onPress={() =>
+                            handleAcceptRide(ride.id, ride.riderId)
+                          }
+                          disabled={actingOnRide}
+                        >
+                          {actingOnRide ? (
+                            <ActivityIndicator color="#fff" size="small" />
+                          ) : (
+                            <Text style={styles.actionText}>Accept</Text>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    ) : !isPending ? (
+                      <>
+                        <View style={styles.confirmedBadge}>
+                          <Ionicons
+                            name="checkmark-circle"
+                            size={18}
+                            color="#34C759"
+                          />
+                          <Text style={styles.confirmedText}>
+                            Ride confirmed
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={[
+                            styles.denyButton,
+                            { marginTop: 12 },
+                            actingOnRide && styles.actionDisabled,
+                          ]}
+                          onPress={() => {
+                            console.log(
+                              "🔵 Cancel Ride button pressed (driver modal)",
+                              {
+                                rideId: ride.id,
+                                riderId: ride.riderId,
+                                riderRideId: ride.riderRideId,
+                                actingOnRide,
+                              },
+                            );
+                            handleCancelRideRequest(
+                              ride.id,
+                              ride.riderId,
+                              ride.riderRideId,
+                            );
+                          }}
+                          disabled={actingOnRide}
+                        >
+                          {actingOnRide ? (
+                            <ActivityIndicator color="#fff" size="small" />
+                          ) : (
+                            <Text style={styles.actionText}>Cancel Ride</Text>
+                          )}
+                        </TouchableOpacity>
+                      </>
+                    ) : null}
+                  </>
+                );
+              })()}
           </View>
         </View>
       </Modal>
@@ -745,123 +1060,286 @@ export default function ScheduleScreen() {
         visible={selectedRiderRide !== null}
         transparent
         animationType="slide"
-        onRequestClose={() => { if (!actingOnRide) setSelectedRiderRide(null); }}
+        onRequestClose={() => {
+          if (!actingOnRide) setSelectedRiderRide(null);
+        }}
       >
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={{ flex: 1 }}
             activeOpacity={1}
-            onPress={() => { 
-              if (!actingOnRide) setSelectedRiderRide(null); 
+            onPress={() => {
+              if (!actingOnRide) setSelectedRiderRide(null);
             }}
           />
           <View style={styles.modalSheet}>
             <View style={styles.sheetHandle} />
-              <ScrollView 
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: 20 }}
-                keyboardShouldPersistTaps="handled"
-              >
-            {selectedRiderRide && (() => {
-              const ride = selectedRiderRide;
-              const confirmed = confirmedRiderRequests.find(r => r.riderRideId === ride.id);
-              const pendingIncoming = incomingRequests.filter(r => r.riderRideId === ride.id);
-              const confirmedDriver = confirmed ? requestDrivers[confirmed.driverId] : null;
-              
-              return (
-                <>
-                  <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>Ride Details</Text>
-                    <TouchableOpacity onPress={() => setSelectedRiderRide(null)} disabled={actingOnRide}>
-                      <Ionicons name="close" size={26} color="#333" />
-                    </TouchableOpacity>
-                  </View>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 20 }}
+              keyboardShouldPersistTaps="handled"
+            >
+              {selectedRiderRide &&
+                (() => {
+                  const ride = selectedRiderRide;
+                  const confirmed = confirmedRiderRequests.find(
+                    (r) => r.riderRideId === ride.id,
+                  );
+                  const pendingIncoming = incomingRequests.filter(
+                    (r) => r.riderRideId === ride.id,
+                  );
+                  const confirmedDriver = confirmed
+                    ? requestDrivers[confirmed.driverId]
+                    : null;
 
-                  {/* Route */}
-                  <View style={styles.detailRow}>
-                    <Ionicons name="location-outline" size={20} color="#34C759" />
-                    <Text style={styles.detailText} numberOfLines={2}>{ride.pickupAddress}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Ionicons name="navigate-outline" size={20} color="#FF3B30" />
-                    <Text style={styles.detailText} numberOfLines={2}>{ride.dropoffAddress}</Text>
-                  </View>
+                  return (
+                    <>
+                      <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>Ride Details</Text>
+                        <TouchableOpacity
+                          onPress={() => setSelectedRiderRide(null)}
+                          disabled={actingOnRide}
+                        >
+                          <Ionicons name="close" size={26} color="#333" />
+                        </TouchableOpacity>
+                      </View>
 
-                  {/* Time */}
-                  <View style={styles.detailRow}>
-                    <Ionicons name="time-outline" size={20} color="#636366" />
-                    <Text style={styles.detailText}>
-                      {format12h(ride.departureTime)}
-                      {ride.estimatedDurationMinutes != null
-                        ? `  ·  ${formatDriveTime(ride.estimatedDurationMinutes)}`
-                        : ''}
-                    </Text>
-                  </View>
+                      {/* Route */}
+                      <View style={styles.detailRow}>
+                        <Ionicons
+                          name="location-outline"
+                          size={20}
+                          color="#34C759"
+                        />
+                        <Text style={styles.detailText} numberOfLines={2}>
+                          {ride.pickupAddress}
+                        </Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Ionicons
+                          name="navigate-outline"
+                          size={20}
+                          color="#FF3B30"
+                        />
+                        <Text style={styles.detailText} numberOfLines={2}>
+                          {ride.dropoffAddress}
+                        </Text>
+                      </View>
 
-                  {/* Days */}
-                  <View style={styles.detailRow}>
-                    <Ionicons name="calendar-outline" size={20} color="#636366" />
-                    <Text style={styles.detailText}>{ride.repeatDays?.join(', ') ?? '—'}</Text>
-                  </View>
+                      {/* Time */}
+                      <View style={styles.detailRow}>
+                        <Ionicons
+                          name="time-outline"
+                          size={20}
+                          color="#636366"
+                        />
+                        <Text style={styles.detailText}>
+                          {format12h(ride.departureTime)}
+                          {ride.estimatedDurationMinutes != null
+                            ? `  ·  ${formatDriveTime(ride.estimatedDurationMinutes)}`
+                            : ""}
+                        </Text>
+                      </View>
 
-                  {/* Status */}
-                  {confirmed ? (
-                    <View style={styles.detailRow}>
-                      <Ionicons name="checkmark-circle" size={20} color="#34C759" />
-                      <Text style={[styles.detailText, { color: '#34C759', fontWeight: '600' }]}>
-                        Driver confirmed{confirmedDriver ? `: ${confirmedDriver.name}` : ''}
-                      </Text>
-                    </View>
-                  ) : pendingIncoming.length > 0 ? (
-                    <View style={styles.detailRow}>
-                      <Ionicons name="car-outline" size={20} color="#007AFF" />
-                      <Text style={[styles.detailText, { color: '#007AFF', fontWeight: '600' }]}>
-                        {pendingIncoming.length} driver{pendingIncoming.length > 1 ? 's' : ''} want{pendingIncoming.length === 1 ? 's' : ''} to match
-                      </Text>
-                    </View>
-                  ) : (
-                    <View style={styles.detailRow}>
-                      <Ionicons name="search-outline" size={20} color="#aeaeb2" />
-                      <Text style={[styles.detailText, { color: '#aeaeb2' }]}>Searching for a driver…</Text>
-                    </View>
-                  )}
+                      {/* Days */}
+                      <View style={styles.detailRow}>
+                        <Ionicons
+                          name="calendar-outline"
+                          size={20}
+                          color="#636366"
+                        />
+                        <Text style={styles.detailText}>
+                          {ride.repeatDays?.join(", ") ?? "—"}
+                        </Text>
+                      </View>
 
-                  {/* View driver page button */}
-                  {confirmedDriver && (
-                    <TouchableOpacity
-                      style={styles.viewProfileButton}
-                      onPress={() => { setSelectedRiderRide(null); handleViewUserPage(confirmedDriver); }}
-                    >
-                      <Ionicons name="person-circle-outline" size={18} color="#007AFF" />
-                      <Text style={styles.viewProfileText}>View Driver's Page</Text>
-                    </TouchableOpacity>
-                  )}
+                      {/* Status */}
+                      {confirmed ? (
+                        <View style={styles.detailRow}>
+                          <Ionicons
+                            name="checkmark-circle"
+                            size={20}
+                            color="#34C759"
+                          />
+                          <Text
+                            style={[
+                              styles.detailText,
+                              { color: "#34C759", fontWeight: "600" },
+                            ]}
+                          >
+                            Driver confirmed
+                            {confirmedDriver ? `: ${confirmedDriver.name}` : ""}
+                          </Text>
+                        </View>
+                      ) : pendingIncoming.length > 0 ? (
+                        <View style={styles.detailRow}>
+                          <Ionicons
+                            name="car-outline"
+                            size={20}
+                            color="#007AFF"
+                          />
+                          <Text
+                            style={[
+                              styles.detailText,
+                              { color: "#007AFF", fontWeight: "600" },
+                            ]}
+                          >
+                            {pendingIncoming.length} driver
+                            {pendingIncoming.length > 1 ? "s" : ""} want
+                            {pendingIncoming.length === 1 ? "s" : ""} to match
+                          </Text>
+                        </View>
+                      ) : (
+                        <View style={styles.detailRow}>
+                          <Ionicons
+                            name="search-outline"
+                            size={20}
+                            color="#aeaeb2"
+                          />
+                          <Text
+                            style={[styles.detailText, { color: "#aeaeb2" }]}
+                          >
+                            Searching for a driver…
+                          </Text>
+                        </View>
+                      )}
 
-                  {/* Action buttons */}
-                  <View style={styles.actionRow}>
-                    {confirmed ? (
-                      <TouchableOpacity
-                        style={[styles.denyButton, actingOnRide && styles.actionDisabled]}
-                        onPress={() => handleCancelRideRequest(confirmed.id, confirmed.driverId, ride.id)}
-                        disabled={actingOnRide}
-                      >
-                        {actingOnRide
-                          ? <ActivityIndicator color="#fff" size="small" />
-                          : <Text style={styles.actionText}>Cancel Ride</Text>}
-                      </TouchableOpacity>
-                    ) : (
-                      <TouchableOpacity
-                        style={[styles.denyButton, actingOnRide && styles.actionDisabled]}
-                        onPress={() => handleDeleteRide(ride.id)}
-                        disabled={actingOnRide}
-                      >
-                        <Text style={styles.actionText}>Remove Ride</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </>
-              );
-            })()}
+                      {/* View driver page button */}
+                      {confirmedDriver && (
+                        <TouchableOpacity
+                          style={styles.viewProfileButton}
+                          onPress={() => {
+                            setSelectedRiderRide(null);
+                            handleViewUserPage(confirmedDriver);
+                          }}
+                        >
+                          <Ionicons
+                            name="person-circle-outline"
+                            size={18}
+                            color="#007AFF"
+                          />
+                          <Text style={styles.viewProfileText}>
+                            View Driver's Page
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {/* Driver-initiated pending requests: accept/decline (also reachable if list "Respond" was flaky) */}
+                      {!confirmed && pendingIncoming.length > 0 && (
+                        <View style={{ gap: 14, marginTop: 6 }}>
+                          {pendingIncoming.map((req) => {
+                            const dName =
+                              requestDrivers[req.driverId]?.name ?? "Driver";
+                            return (
+                              <View
+                                key={req.id}
+                                style={{
+                                  borderWidth: 1,
+                                  borderColor: "#bfdbfe",
+                                  borderRadius: 12,
+                                  padding: 12,
+                                  backgroundColor: "#EFF6FF",
+                                }}
+                              >
+                                <Text
+                                  style={[
+                                    styles.detailText,
+                                    { fontWeight: "600", marginBottom: 10 },
+                                  ]}
+                                >
+                                  {dName} wants to drive this ride
+                                </Text>
+                                <View
+                                  style={[styles.actionRow, { marginTop: 0 }]}
+                                >
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.denyButton,
+                                      actingOnRide && styles.actionDisabled,
+                                    ]}
+                                    onPress={() =>
+                                      handleDenyRide(req.id, req.driverId)
+                                    }
+                                    disabled={actingOnRide}
+                                  >
+                                    {actingOnRide ? (
+                                      <ActivityIndicator
+                                        color="#fff"
+                                        size="small"
+                                      />
+                                    ) : (
+                                      <Text style={styles.actionText}>
+                                        Decline
+                                      </Text>
+                                    )}
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.acceptButton,
+                                      actingOnRide && styles.actionDisabled,
+                                    ]}
+                                    onPress={() =>
+                                      handleAcceptRide(req.id, req.driverId)
+                                    }
+                                    disabled={actingOnRide}
+                                  >
+                                    {actingOnRide ? (
+                                      <ActivityIndicator
+                                        color="#fff"
+                                        size="small"
+                                      />
+                                    ) : (
+                                      <Text style={styles.actionText}>
+                                        Accept
+                                      </Text>
+                                    )}
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+
+                      {/* Action buttons */}
+                      <View style={styles.actionRow}>
+                        {confirmed ? (
+                          <TouchableOpacity
+                            style={[
+                              styles.denyButton,
+                              actingOnRide && styles.actionDisabled,
+                            ]}
+                            onPress={() =>
+                              handleCancelRideRequest(
+                                confirmed.id,
+                                confirmed.driverId,
+                                ride.id,
+                              )
+                            }
+                            disabled={actingOnRide}
+                          >
+                            {actingOnRide ? (
+                              <ActivityIndicator color="#fff" size="small" />
+                            ) : (
+                              <Text style={styles.actionText}>Cancel Ride</Text>
+                            )}
+                          </TouchableOpacity>
+                        ) : (
+                          <TouchableOpacity
+                            style={[
+                              styles.denyButton,
+                              actingOnRide && styles.actionDisabled,
+                            ]}
+                            onPress={() => handleDeleteRide(ride.id)}
+                            disabled={actingOnRide}
+                          >
+                            <Text style={styles.actionText}>Remove Ride</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </>
+                  );
+                })()}
             </ScrollView>
           </View>
         </View>
@@ -872,74 +1350,115 @@ export default function ScheduleScreen() {
         visible={selectedIncoming !== null}
         transparent
         animationType="slide"
-        onRequestClose={() => { if (!actingOnRide) setSelectedIncoming(null); }}
+        onRequestClose={() => {
+          if (!actingOnRide) setSelectedIncoming(null);
+        }}
       >
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={{ flex: 1 }}
             activeOpacity={1}
-            onPress={() => { if (!actingOnRide) setSelectedIncoming(null); }}
+            onPress={() => {
+              if (!actingOnRide) setSelectedIncoming(null);
+            }}
           />
           <View style={styles.modalSheet}>
             <View style={styles.sheetHandle} />
-            {selectedIncoming && (() => {
-              const req = selectedIncoming;
-              const driverName = requestDrivers[req.driverId]?.name ?? 'Driver';
-              return (
-                <>
-                  <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>Driver Match Request</Text>
-                    <TouchableOpacity onPress={() => setSelectedIncoming(null)} disabled={actingOnRide}>
-                      <Ionicons name="close" size={26} color="#333" />
-                    </TouchableOpacity>
-                  </View>
+            {selectedIncoming &&
+              (() => {
+                const req = selectedIncoming;
+                const driverName =
+                  requestDrivers[req.driverId]?.name ?? "Driver";
+                return (
+                  <>
+                    <View style={styles.modalHeader}>
+                      <Text style={styles.modalTitle}>
+                        Driver Match Request
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setSelectedIncoming(null)}
+                        disabled={actingOnRide}
+                      >
+                        <Ionicons name="close" size={26} color="#333" />
+                      </TouchableOpacity>
+                    </View>
 
-                  <View style={styles.detailRow}>
-                    <Ionicons name="person-circle-outline" size={20} color="#636366" />
-                    <Text style={styles.detailText}>Driver: {driverName}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Ionicons name="time-outline" size={20} color="#636366" />
-                    <Text style={styles.detailText}>
-                      {format12h(req.requestedStart)} – {format12h(req.requestedEnd)}
-                    </Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Ionicons name="calendar-outline" size={20} color="#636366" />
-                    <Text style={styles.detailText}>
-                      {req.repeatDays?.join(', ') ?? req.date}
-                    </Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Ionicons name="information-circle-outline" size={20} color="#636366" />
-                    <Text style={[styles.detailText, { color: '#FF9500', fontWeight: '600' }]}>
-                      This driver would like to drive you
-                    </Text>
-                  </View>
+                    <View style={styles.detailRow}>
+                      <Ionicons
+                        name="person-circle-outline"
+                        size={20}
+                        color="#636366"
+                      />
+                      <Text style={styles.detailText}>
+                        Driver: {driverName}
+                      </Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Ionicons name="time-outline" size={20} color="#636366" />
+                      <Text style={styles.detailText}>
+                        {format12h(req.requestedStart)} –{" "}
+                        {format12h(req.requestedEnd)}
+                      </Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Ionicons
+                        name="calendar-outline"
+                        size={20}
+                        color="#636366"
+                      />
+                      <Text style={styles.detailText}>
+                        {req.repeatDays?.join(", ") ?? req.date}
+                      </Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Ionicons
+                        name="information-circle-outline"
+                        size={20}
+                        color="#636366"
+                      />
+                      <Text
+                        style={[
+                          styles.detailText,
+                          { color: "#FF9500", fontWeight: "600" },
+                        ]}
+                      >
+                        This driver would like to drive you
+                      </Text>
+                    </View>
 
-                  <View style={styles.actionRow}>
-                    <TouchableOpacity
-                      style={[styles.denyButton, actingOnRide && styles.actionDisabled]}
-                      onPress={() => handleDenyRide(req.id, req.driverId)}
-                      disabled={actingOnRide}
-                    >
-                      {actingOnRide
-                        ? <ActivityIndicator color="#fff" size="small" />
-                        : <Text style={styles.actionText}>Decline</Text>}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.acceptButton, actingOnRide && styles.actionDisabled]}
-                      onPress={() => handleAcceptRide(req.id, req.driverId)}
-                      disabled={actingOnRide}
-                    >
-                      {actingOnRide
-                        ? <ActivityIndicator color="#fff" size="small" />
-                        : <Text style={styles.actionText}>Accept</Text>}
-                    </TouchableOpacity>
-                  </View>
-                </>
-              );
-            })()}
+                    <View style={styles.actionRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.denyButton,
+                          actingOnRide && styles.actionDisabled,
+                        ]}
+                        onPress={() => handleDenyRide(req.id, req.driverId)}
+                        disabled={actingOnRide}
+                      >
+                        {actingOnRide ? (
+                          <ActivityIndicator color="#fff" size="small" />
+                        ) : (
+                          <Text style={styles.actionText}>Decline</Text>
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.acceptButton,
+                          actingOnRide && styles.actionDisabled,
+                        ]}
+                        onPress={() => handleAcceptRide(req.id, req.driverId)}
+                        disabled={actingOnRide}
+                      >
+                        {actingOnRide ? (
+                          <ActivityIndicator color="#fff" size="small" />
+                        ) : (
+                          <Text style={styles.actionText}>Accept</Text>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                );
+              })()}
           </View>
         </View>
       </Modal>
@@ -950,6 +1469,7 @@ export default function ScheduleScreen() {
         transparent
         animationType="fade"
         onRequestClose={() => {
+          pendingCancellationRef.current = null;
           setShowCancelConfirm(false);
           setPendingCancellation(null);
         }}
@@ -964,6 +1484,7 @@ export default function ScheduleScreen() {
               <TouchableOpacity
                 style={[styles.confirmButton, styles.confirmKeep]}
                 onPress={() => {
+                  pendingCancellationRef.current = null;
                   setShowCancelConfirm(false);
                   setPendingCancellation(null);
                 }}
@@ -973,7 +1494,7 @@ export default function ScheduleScreen() {
               <TouchableOpacity
                 style={[styles.confirmButton, styles.confirmCancel]}
                 onPress={() => {
-                  console.log('🔴 CANCEL RIDE BUTTON IN DIALOG CLICKED!');
+                  console.log("🔴 CANCEL RIDE BUTTON IN DIALOG CLICKED!");
                   executeCancellation();
                 }}
               >
@@ -1013,7 +1534,7 @@ export default function ScheduleScreen() {
               <TouchableOpacity
                 style={[styles.confirmButton, styles.confirmCancel]}
                 onPress={() => {
-                  console.log('🔴 DELETE RIDE BUTTON IN DIALOG CLICKED!');
+                  console.log("🔴 DELETE RIDE BUTTON IN DIALOG CLICKED!");
                   executeDelete();
                 }}
               >
@@ -1030,7 +1551,12 @@ export default function ScheduleScreen() {
 // ─── Day accordion section ────────────────────────────────────────────────────
 
 function DaySection({
-  day, isOpen, onToggle, hasAvailability, hasRides, children,
+  day,
+  isOpen,
+  onToggle,
+  hasAvailability,
+  hasRides,
+  children,
 }: {
   day: string;
   isOpen: boolean;
@@ -1052,15 +1578,17 @@ function DaySection({
           </Text>
           {(hasAvailability || hasRides) && (
             <View style={styles.dotRow}>
-              {hasAvailability && <View style={[styles.dot, styles.dotGreen]} />}
+              {hasAvailability && (
+                <View style={[styles.dot, styles.dotGreen]} />
+              )}
               {hasRides && <View style={[styles.dot, styles.dotBlue]} />}
             </View>
           )}
         </View>
         <Ionicons
-          name={isOpen ? 'chevron-up' : 'chevron-down'}
+          name={isOpen ? "chevron-up" : "chevron-down"}
           size={18}
-          color={isOpen ? '#007AFF' : '#aeaeb2'}
+          color={isOpen ? "#007AFF" : "#aeaeb2"}
         />
       </TouchableOpacity>
 
@@ -1072,7 +1600,11 @@ function DaySection({
 // ─── Driver day content ───────────────────────────────────────────────────────
 
 function DriverDayContent({
-  availabilityBlocks, rides, otherUsers, onRideTap, onDeleteBlock,
+  availabilityBlocks,
+  rides,
+  otherUsers,
+  onRideTap,
+  onDeleteBlock,
 }: {
   availabilityBlocks: ScheduleBlockWithId[];
   rides: RideRequestWithId[];
@@ -1081,18 +1613,25 @@ function DriverDayContent({
   onDeleteBlock: (id: string) => void;
 }) {
   // Rider asked the driver → driver must respond
-  const riderInitiated = rides.filter(r => r.status === 'pending' && r.initiatedBy !== 'driver');
+  const riderInitiated = rides.filter(
+    (r) => r.status === "pending" && r.initiatedBy !== "driver",
+  );
   // Driver asked the rider → waiting for rider to respond
-  const driverInitiated = rides.filter(r => r.status === 'pending' && r.initiatedBy === 'driver');
-  const confirmed = rides.filter(r => r.status === 'confirmed');
+  const driverInitiated = rides.filter(
+    (r) => r.status === "pending" && r.initiatedBy === "driver",
+  );
+  const confirmed = rides.filter((r) => r.status === "confirmed");
 
   const RideRow = ({ ride }: { ride: RideRequestWithId }) => {
-    const isPending = ride.status === 'pending';
-    const isAwaiting = isPending && ride.initiatedBy === 'driver';
-    const riderName = otherUsers[ride.riderId]?.name ?? 'Rider';
+    const isPending = ride.status === "pending";
+    const isAwaiting = isPending && ride.initiatedBy === "driver";
+    const riderName = otherUsers[ride.riderId]?.name ?? "Rider";
     return (
       <TouchableOpacity
-        style={[styles.rideRow, isPending ? styles.rideRowPending : styles.rideRowConfirmed]}
+        style={[
+          styles.rideRow,
+          isPending ? styles.rideRowPending : styles.rideRowConfirmed,
+        ]}
         onPress={() => onRideTap(ride)}
         activeOpacity={0.75}
       >
@@ -1103,9 +1642,18 @@ function DriverDayContent({
           </Text>
         </View>
         <View style={styles.rideRowRight}>
-          <View style={[styles.statusPill, isAwaiting ? styles.pillAwaiting : isPending ? styles.pillPending : styles.pillConfirmed]}>
+          <View
+            style={[
+              styles.statusPill,
+              isAwaiting
+                ? styles.pillAwaiting
+                : isPending
+                  ? styles.pillPending
+                  : styles.pillConfirmed,
+            ]}
+          >
             <Text style={styles.statusPillText}>
-              {isAwaiting ? 'Awaiting' : isPending ? 'Pending' : 'Confirmed'}
+              {isAwaiting ? "Awaiting" : isPending ? "Pending" : "Confirmed"}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={15} color="#c7c7cc" />
@@ -1121,13 +1669,16 @@ function DriverDayContent({
       {availabilityBlocks.length === 0 ? (
         <Text style={styles.emptyNote}>No availability set for this day</Text>
       ) : (
-        availabilityBlocks.map(block => (
+        availabilityBlocks.map((block) => (
           <View key={block.id} style={styles.availRow}>
             <View style={styles.availDot} />
             <Text style={styles.availText}>
               {format12h(block.startTime)} – {format12h(block.endTime)}
             </Text>
-            <TouchableOpacity onPress={() => onDeleteBlock(block.id)} style={styles.availDelete}>
+            <TouchableOpacity
+              onPress={() => onDeleteBlock(block.id)}
+              style={styles.availDelete}
+            >
               <Ionicons name="close-circle" size={18} color="#c7c7cc" />
             </TouchableOpacity>
           </View>
@@ -1135,26 +1686,36 @@ function DriverDayContent({
       )}
 
       {/* Ride Requests — rider asked, driver responds */}
-      <Text style={[styles.sectionLabel, { marginTop: 20 }]}>RIDE REQUESTS</Text>
+      <Text style={[styles.sectionLabel, { marginTop: 20 }]}>
+        RIDE REQUESTS
+      </Text>
       {riderInitiated.length === 0 ? (
         <Text style={styles.emptyNote}>No pending ride requests</Text>
       ) : (
-        riderInitiated.map(ride => <RideRow key={ride.id} ride={ride} />)
+        riderInitiated.map((ride) => <RideRow key={ride.id} ride={ride} />)
       )}
 
       {/* Awaiting Response — driver asked, waiting for rider */}
       {driverInitiated.length > 0 && (
         <>
-          <Text style={[styles.sectionLabel, { marginTop: 20 }]}>AWAITING RESPONSE</Text>
-          {driverInitiated.map(ride => <RideRow key={ride.id} ride={ride} />)}
+          <Text style={[styles.sectionLabel, { marginTop: 20 }]}>
+            AWAITING RESPONSE
+          </Text>
+          {driverInitiated.map((ride) => (
+            <RideRow key={ride.id} ride={ride} />
+          ))}
         </>
       )}
 
       {/* Confirmed rides */}
       {confirmed.length > 0 && (
         <>
-          <Text style={[styles.sectionLabel, { marginTop: 20 }]}>SCHEDULED RIDES</Text>
-          {confirmed.map(ride => <RideRow key={ride.id} ride={ride} />)}
+          <Text style={[styles.sectionLabel, { marginTop: 20 }]}>
+            SCHEDULED RIDES
+          </Text>
+          {confirmed.map((ride) => (
+            <RideRow key={ride.id} ride={ride} />
+          ))}
         </>
       )}
     </View>
@@ -1164,7 +1725,12 @@ function DriverDayContent({
 // ─── Rider day content ────────────────────────────────────────────────────────
 
 function RiderDayContent({
-  rides, incomingRequests, confirmedRequests, requestDrivers, onRideTap, onIncomingTap,
+  rides,
+  incomingRequests,
+  confirmedRequests,
+  requestDrivers,
+  onRideTap,
+  onIncomingTap,
 }: {
   rides: RiderRideWithId[];
   incomingRequests: RideRequestWithId[];
@@ -1174,57 +1740,80 @@ function RiderDayContent({
   onIncomingTap: (r: RideRequestWithId) => void;
 }) {
   if (rides.length === 0) {
-    return <Text style={styles.emptyNote}>No rides scheduled for this day</Text>;
+    return (
+      <Text style={styles.emptyNote}>No rides scheduled for this day</Text>
+    );
   }
   return (
     <View style={{ gap: 10 }}>
-      {rides.map(ride => {
-        const pendingForRide = incomingRequests.filter(r => r.riderRideId === ride.id);
-        const isConfirmed = confirmedRequests.some(r => r.riderRideId === ride.id);
+      {rides.map((ride) => {
+        const pendingForRide = incomingRequests.filter(
+          (r) => r.riderRideId === ride.id,
+        );
+        const isConfirmed = confirmedRequests.some(
+          (r) => r.riderRideId === ride.id,
+        );
         return (
-          <TouchableOpacity
+          <View
             key={ride.id}
-            style={[styles.riderRideCard, isConfirmed && styles.riderRideCardConfirmed]}
-            onPress={() => {
-              onRideTap(ride);
-            }}
-            activeOpacity={0.75}
+            style={[
+              styles.riderRideCard,
+              isConfirmed && styles.riderRideCardConfirmed,
+            ]}
           >
-            <View style={styles.riderRideCardRow}>
-              <View style={styles.routeViz}>
-                <View style={styles.routeDotGreen} />
-                <View style={styles.routeVizLine} />
-                <Ionicons name="location" size={14} color="#FF3B30" />
-              </View>
-              <View style={styles.routeInfo}>
-                <Text style={styles.routeAddr} numberOfLines={1}>{ride.pickupAddress}</Text>
-                <View style={styles.routeTimeBadge}>
-                  <Ionicons name="time-outline" size={12} color="#8e8e93" />
-                  <Text style={styles.routeTimeTxt}>
-                    {format12h(ride.departureTime)}
-                    {ride.estimatedDurationMinutes != null
-                      ? `  ·  ${formatDriveTime(ride.estimatedDurationMinutes)}`
-                      : ''}
+            <TouchableOpacity
+              onPress={() => {
+                onRideTap(ride);
+              }}
+              activeOpacity={0.75}
+            >
+              <View style={styles.riderRideCardRow}>
+                <View style={styles.routeViz}>
+                  <View style={styles.routeDotGreen} />
+                  <View style={styles.routeVizLine} />
+                  <Ionicons name="location" size={14} color="#FF3B30" />
+                </View>
+                <View style={styles.routeInfo}>
+                  <Text style={styles.routeAddr} numberOfLines={1}>
+                    {ride.pickupAddress}
+                  </Text>
+                  <View style={styles.routeTimeBadge}>
+                    <Ionicons name="time-outline" size={12} color="#8e8e93" />
+                    <Text style={styles.routeTimeTxt}>
+                      {format12h(ride.departureTime)}
+                      {ride.estimatedDurationMinutes != null
+                        ? `  ·  ${formatDriveTime(ride.estimatedDurationMinutes)}`
+                        : ""}
+                    </Text>
+                  </View>
+                  <Text style={styles.routeAddr} numberOfLines={1}>
+                    {ride.dropoffAddress}
                   </Text>
                 </View>
-                <Text style={styles.routeAddr} numberOfLines={1}>{ride.dropoffAddress}</Text>
+                <View style={{ alignItems: "flex-end", gap: 4 }}>
+                  {isConfirmed && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={18}
+                      color="#34C759"
+                    />
+                  )}
+                  <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+                </View>
               </View>
-              <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                {isConfirmed && (
-                  <Ionicons name="checkmark-circle" size={18} color="#34C759" />
-                )}
-                <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
-              </View>
-            </View>
+            </TouchableOpacity>
 
             {/* Incoming driver match requests for this ride */}
-            {pendingForRide.map(req => {
-              const driverName = requestDrivers[req.driverId]?.name ?? 'A driver';
+            {pendingForRide.map((req) => {
+              const driverName =
+                requestDrivers[req.driverId]?.name ?? "A driver";
               return (
                 <TouchableOpacity
                   key={req.id}
                   style={styles.incomingRequestBanner}
-                  onPress={(e) => { e.stopPropagation?.(); onIncomingTap(req); }}
+                  onPress={() => {
+                    onIncomingTap(req);
+                  }}
                   activeOpacity={0.8}
                 >
                   <View style={styles.incomingRequestLeft}>
@@ -1234,13 +1823,19 @@ function RiderDayContent({
                     </Text>
                   </View>
                   <View style={styles.incomingRequestAction}>
-                    <Text style={styles.incomingRequestActionText}>Respond</Text>
-                    <Ionicons name="chevron-forward" size={13} color="#007AFF" />
+                    <Text style={styles.incomingRequestActionText}>
+                      Respond
+                    </Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={13}
+                      color="#007AFF"
+                    />
                   </View>
                 </TouchableOpacity>
               );
             })}
-          </TouchableOpacity>
+          </View>
         );
       })}
     </View>
@@ -1258,20 +1853,25 @@ interface NominatimResult {
 
 function formatSuggestionLabel(item: NominatimResult): string {
   const addr = item.address ?? {};
-  const street = [addr.house_number, addr.road].filter(Boolean).join(' ');
-  const city = addr.city || addr.town || addr.village || addr.suburb || '';
-  const state = addr.state || '';
+  const street = [addr.house_number, addr.road].filter(Boolean).join(" ");
+  const city = addr.city || addr.town || addr.village || addr.suburb || "";
+  const state = addr.state || "";
   const parts = [street, city, state].filter(Boolean);
-  return parts.length > 0 ? parts.join(', ') : item.display_name;
+  return parts.length > 0 ? parts.join(", ") : item.display_name;
 }
 
 function AddressInput({
-  label, value, placeholder, returnKeyType, onChangeText, onSelect,
+  label,
+  value,
+  placeholder,
+  returnKeyType,
+  onChangeText,
+  onSelect,
 }: {
   label: string;
   value: string;
   placeholder?: string;
-  returnKeyType?: 'next' | 'done';
+  returnKeyType?: "next" | "done";
   onChangeText: (text: string) => void;
   onSelect: (address: string, lat: number, lng: number) => void;
 }) {
@@ -1280,17 +1880,23 @@ function AddressInput({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchSuggestions = async (q: string) => {
-    if (q.trim().length < 4) { setSuggestions([]); return; }
+    if (q.trim().length < 4) {
+      setSuggestions([]);
+      return;
+    }
     setFetching(true);
     try {
       const res = await fetch(
         `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1`,
-        { headers: { 'Accept-Language': 'en', 'User-Agent': 'TandemApp/1.0' } },
+        { headers: { "Accept-Language": "en", "User-Agent": "TandemApp/1.0" } },
       );
       const data = await res.json();
       setSuggestions(Array.isArray(data) ? data : []);
-    } catch { setSuggestions([]); }
-    finally { setFetching(false); }
+    } catch {
+      setSuggestions([]);
+    } finally {
+      setFetching(false);
+    }
   };
 
   const handleChange = (text: string) => {
@@ -1301,7 +1907,11 @@ function AddressInput({
 
   const handleSelect = (item: NominatimResult) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    onSelect(formatSuggestionLabel(item), parseFloat(item.lat), parseFloat(item.lon));
+    onSelect(
+      formatSuggestionLabel(item),
+      parseFloat(item.lat),
+      parseFloat(item.lon),
+    );
     setSuggestions([]);
   };
 
@@ -1319,14 +1929,23 @@ function AddressInput({
           autoCapitalize="words"
           returnKeyType={returnKeyType}
         />
-        {fetching && <ActivityIndicator size="small" color="#007AFF" style={styles.addressSpinner} />}
+        {fetching && (
+          <ActivityIndicator
+            size="small"
+            color="#007AFF"
+            style={styles.addressSpinner}
+          />
+        )}
       </View>
       {suggestions.length > 0 && (
         <View style={styles.suggestionsList}>
           {suggestions.map((item, idx) => (
             <TouchableOpacity
               key={idx}
-              style={[styles.suggestionItem, idx === suggestions.length - 1 && styles.suggestionItemLast]}
+              style={[
+                styles.suggestionItem,
+                idx === suggestions.length - 1 && styles.suggestionItemLast,
+              ]}
               onPress={() => handleSelect(item)}
             >
               <Ionicons name="location-outline" size={15} color="#007AFF" />
@@ -1343,16 +1962,32 @@ function AddressInput({
 
 // ─── Form components ──────────────────────────────────────────────────────────
 
-function DayPicker({ selected, onToggle }: { selected: string[]; onToggle: (d: string) => void }) {
+function DayPicker({
+  selected,
+  onToggle,
+}: {
+  selected: string[];
+  onToggle: (d: string) => void;
+}) {
   return (
     <View style={styles.daysRow}>
-      {DAYS.map(d => (
+      {DAYS.map((d) => (
         <TouchableOpacity
           key={d}
-          style={[styles.dayChip, selected.includes(d) && styles.dayChipSelected]}
+          style={[
+            styles.dayChip,
+            selected.includes(d) && styles.dayChipSelected,
+          ]}
           onPress={() => onToggle(d)}
         >
-          <Text style={[styles.dayChipText, selected.includes(d) && styles.dayChipTextSelected]}>{d}</Text>
+          <Text
+            style={[
+              styles.dayChipText,
+              selected.includes(d) && styles.dayChipTextSelected,
+            ]}
+          >
+            {d}
+          </Text>
         </TouchableOpacity>
       ))}
     </View>
@@ -1360,10 +1995,17 @@ function DayPicker({ selected, onToggle }: { selected: string[]; onToggle: (d: s
 }
 
 function TimeDropdown({
-  label, value, show, onToggle, onSelect,
+  label,
+  value,
+  show,
+  onToggle,
+  onSelect,
 }: {
-  label: string; value: string; show: boolean;
-  onToggle: () => void; onSelect: (t: string) => void;
+  label: string;
+  value: string;
+  show: boolean;
+  onToggle: () => void;
+  onSelect: (t: string) => void;
 }) {
   return (
     <>
@@ -1374,8 +2016,12 @@ function TimeDropdown({
       </TouchableOpacity>
       {show && (
         <ScrollView style={styles.dropdownMenu} nestedScrollEnabled>
-          {TIME_OPTIONS.map(t => (
-            <TouchableOpacity key={t} style={styles.dropdownItem} onPress={() => onSelect(t)}>
+          {TIME_OPTIONS.map((t) => (
+            <TouchableOpacity
+              key={t}
+              style={styles.dropdownItem}
+              onPress={() => onSelect(t)}
+            >
               <Text style={styles.dropdownItemText}>{format12h(t)}</Text>
             </TouchableOpacity>
           ))}
@@ -1386,14 +2032,26 @@ function TimeDropdown({
 }
 
 function RiderForm({
-  pickup, dropoff, departureTime, setDepartureTime, days,
-  showDepartureDropdown, setShowDepartureDropdown, onToggleDay,
-  onPickupChange, onPickupSelect, onDropoffChange, onDropoffSelect,
+  pickup,
+  dropoff,
+  departureTime,
+  setDepartureTime,
+  days,
+  showDepartureDropdown,
+  setShowDepartureDropdown,
+  onToggleDay,
+  onPickupChange,
+  onPickupSelect,
+  onDropoffChange,
+  onDropoffSelect,
 }: {
-  pickup: string; dropoff: string;
-  departureTime: string; setDepartureTime: (v: string) => void;
+  pickup: string;
+  dropoff: string;
+  departureTime: string;
+  setDepartureTime: (v: string) => void;
   days: string[];
-  showDepartureDropdown: boolean; setShowDepartureDropdown: (v: boolean) => void;
+  showDepartureDropdown: boolean;
+  setShowDepartureDropdown: (v: boolean) => void;
   onToggleDay: (d: string) => void;
   onPickupChange: (text: string) => void;
   onPickupSelect: (address: string, lat: number, lng: number) => void;
@@ -1403,20 +2061,30 @@ function RiderForm({
   return (
     <>
       <AddressInput
-        label="Pickup Address" value={pickup} returnKeyType="next"
+        label="Pickup Address"
+        value={pickup}
+        returnKeyType="next"
         placeholder="e.g. 123 Sesame Street, New York"
-        onChangeText={onPickupChange} onSelect={onPickupSelect}
+        onChangeText={onPickupChange}
+        onSelect={onPickupSelect}
       />
       <AddressInput
-        label="Dropoff Address" value={dropoff} returnKeyType="done"
+        label="Dropoff Address"
+        value={dropoff}
+        returnKeyType="done"
         placeholder="e.g. 456 Allen Blvd, New York"
-        onChangeText={onDropoffChange} onSelect={onDropoffSelect}
+        onChangeText={onDropoffChange}
+        onSelect={onDropoffSelect}
       />
       <TimeDropdown
-        label="Departure Time" value={departureTime}
+        label="Departure Time"
+        value={departureTime}
         show={showDepartureDropdown}
         onToggle={() => setShowDepartureDropdown(!showDepartureDropdown)}
-        onSelect={(t) => { setDepartureTime(t); setShowDepartureDropdown(false); }}
+        onSelect={(t) => {
+          setDepartureTime(t);
+          setShowDepartureDropdown(false);
+        }}
       />
       <Text style={styles.fieldLabel}>Days of the Week</Text>
       <DayPicker selected={days} onToggle={onToggleDay} />
@@ -1425,14 +2093,26 @@ function RiderForm({
 }
 
 function DriverForm({
-  days, startTime, setStartTime, endTime, setEndTime,
-  showStartDropdown, setShowStartDropdown, showEndDropdown, setShowEndDropdown, onToggleDay,
+  days,
+  startTime,
+  setStartTime,
+  endTime,
+  setEndTime,
+  showStartDropdown,
+  setShowStartDropdown,
+  showEndDropdown,
+  setShowEndDropdown,
+  onToggleDay,
 }: {
   days: string[];
-  startTime: string; setStartTime: (v: string) => void;
-  endTime: string; setEndTime: (v: string) => void;
-  showStartDropdown: boolean; setShowStartDropdown: (v: boolean) => void;
-  showEndDropdown: boolean; setShowEndDropdown: (v: boolean) => void;
+  startTime: string;
+  setStartTime: (v: string) => void;
+  endTime: string;
+  setEndTime: (v: string) => void;
+  showStartDropdown: boolean;
+  setShowStartDropdown: (v: boolean) => void;
+  showEndDropdown: boolean;
+  setShowEndDropdown: (v: boolean) => void;
   onToggleDay: (d: string) => void;
 }) {
   return (
@@ -1440,14 +2120,24 @@ function DriverForm({
       <Text style={styles.fieldLabel}>Days of the Week</Text>
       <DayPicker selected={days} onToggle={onToggleDay} />
       <TimeDropdown
-        label="Available From" value={startTime} show={showStartDropdown}
+        label="Available From"
+        value={startTime}
+        show={showStartDropdown}
         onToggle={() => setShowStartDropdown(!showStartDropdown)}
-        onSelect={(t) => { setStartTime(t); setShowStartDropdown(false); }}
+        onSelect={(t) => {
+          setStartTime(t);
+          setShowStartDropdown(false);
+        }}
       />
       <TimeDropdown
-        label="Available Until" value={endTime} show={showEndDropdown}
+        label="Available Until"
+        value={endTime}
+        show={showEndDropdown}
         onToggle={() => setShowEndDropdown(!showEndDropdown)}
-        onSelect={(t) => { setEndTime(t); setShowEndDropdown(false); }}
+        onSelect={(t) => {
+          setEndTime(t);
+          setShowEndDropdown(false);
+        }}
       />
     </>
   );
@@ -1456,19 +2146,29 @@ function DriverForm({
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f2f2f7' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: "#f2f2f7" },
+  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
 
   // ── Header
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingTop: 60, paddingBottom: 16,
-    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e5ea',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: 60,
+    paddingBottom: 16,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e5ea",
   },
-  headerTitle: { fontSize: 28, fontWeight: 'bold', color: '#1c1c1e' },
+  headerTitle: { fontSize: 28, fontWeight: "bold", color: "#1c1c1e" },
   addButton: {
-    backgroundColor: '#007AFF', width: 36, height: 36,
-    borderRadius: 18, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: "#007AFF",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   // ── List
@@ -1476,223 +2176,373 @@ const styles = StyleSheet.create({
 
   // ── Day accordion
   daySection: {
-    backgroundColor: '#fff', borderRadius: 14, marginBottom: 10,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
-    overflow: 'hidden',
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    marginBottom: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+    overflow: "hidden",
   },
   daySectionOpen: {
-    shadowOpacity: 0.1, shadowRadius: 8, elevation: 4,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
   dayHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 18, paddingVertical: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    paddingVertical: 16,
   },
-  dayHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  dayName: { fontSize: 16, fontWeight: '600', color: '#1c1c1e' },
-  dayNameOpen: { color: '#007AFF' },
-  dotRow: { flexDirection: 'row', gap: 5 },
+  dayHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  dayName: { fontSize: 16, fontWeight: "600", color: "#1c1c1e" },
+  dayNameOpen: { color: "#007AFF" },
+  dotRow: { flexDirection: "row", gap: 5 },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  dotGreen: { backgroundColor: '#34C759' },
-  dotBlue: { backgroundColor: '#007AFF' },
+  dotGreen: { backgroundColor: "#34C759" },
+  dotBlue: { backgroundColor: "#007AFF" },
   dayBody: {
-    paddingHorizontal: 18, paddingBottom: 18,
-    borderTopWidth: 1, borderTopColor: '#f2f2f7',
+    paddingHorizontal: 18,
+    paddingBottom: 18,
+    borderTopWidth: 1,
+    borderTopColor: "#f2f2f7",
     paddingTop: 16,
   },
 
   // ── Section labels
   sectionLabel: {
-    fontSize: 11, fontWeight: '700', color: '#8e8e93',
-    letterSpacing: 0.6, marginBottom: 10,
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#8e8e93",
+    letterSpacing: 0.6,
+    marginBottom: 10,
   },
   emptyNote: {
-    fontSize: 13, color: '#aeaeb2', fontStyle: 'italic', marginBottom: 4,
+    fontSize: 13,
+    color: "#aeaeb2",
+    fontStyle: "italic",
+    marginBottom: 4,
   },
 
   // ── Availability row (driver)
   availRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#f0fdf4', borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 11,
-    marginBottom: 8, borderWidth: 1, borderColor: '#bbf7d0',
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#f0fdf4",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
   },
   availDot: {
-    width: 10, height: 10, borderRadius: 5, backgroundColor: '#34C759',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#34C759",
   },
-  availText: { flex: 1, fontSize: 14, fontWeight: '500', color: '#16a34a' },
+  availText: { flex: 1, fontSize: 14, fontWeight: "500", color: "#16a34a" },
   availDelete: { padding: 2 },
 
   // ── Ride row (driver)
   rideRow: {
-    flexDirection: 'row', alignItems: 'center',
-    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
-    marginBottom: 8, borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
+    borderWidth: 1,
   },
-  rideRowPending: { backgroundColor: '#fff8f0', borderColor: '#fdd9a0' },
-  rideRowConfirmed: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' },
+  rideRowPending: { backgroundColor: "#fff8f0", borderColor: "#fdd9a0" },
+  rideRowConfirmed: { backgroundColor: "#eff6ff", borderColor: "#bfdbfe" },
   rideRowLeft: { flex: 1, gap: 2 },
-  rideRowName: { fontSize: 14, fontWeight: '600', color: '#1c1c1e' },
-  rideRowTime: { fontSize: 12, color: '#636366' },
-  rideRowRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rideRowName: { fontSize: 14, fontWeight: "600", color: "#1c1c1e" },
+  rideRowTime: { fontSize: 12, color: "#636366" },
+  rideRowRight: { flexDirection: "row", alignItems: "center", gap: 6 },
   statusPill: {
-    borderRadius: 20, paddingHorizontal: 9, paddingVertical: 3,
+    borderRadius: 20,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
   },
-  pillPending: { backgroundColor: '#FF9500' },
-  pillAwaiting: { backgroundColor: '#8e8e93' },
-  pillConfirmed: { backgroundColor: '#007AFF' },
-  statusPillText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  pillPending: { backgroundColor: "#FF9500" },
+  pillAwaiting: { backgroundColor: "#8e8e93" },
+  pillConfirmed: { backgroundColor: "#007AFF" },
+  statusPillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
 
   // ── Rider ride card
   riderRideCard: {
-    backgroundColor: '#f9f9fb',
-    borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#e5e5ea',
+    backgroundColor: "#f9f9fb",
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#e5e5ea",
   },
   riderRideCardConfirmed: {
-    backgroundColor: '#f0fdf4', borderColor: '#bbf7d0',
+    backgroundColor: "#f0fdf4",
+    borderColor: "#bbf7d0",
   },
   riderRideCardRow: {
-    flexDirection: 'row', alignItems: 'flex-start',
+    flexDirection: "row",
+    alignItems: "flex-start",
   },
-  routeViz: { alignItems: 'center', marginRight: 12, paddingTop: 2, gap: 3 },
+  routeViz: { alignItems: "center", marginRight: 12, paddingTop: 2, gap: 3 },
   routeDotGreen: {
-    width: 10, height: 10, borderRadius: 5, backgroundColor: '#34C759',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#34C759",
   },
-  routeVizLine: { width: 2, height: 18, backgroundColor: '#d1d1d6', marginVertical: 2 },
+  routeVizLine: {
+    width: 2,
+    height: 18,
+    backgroundColor: "#d1d1d6",
+    marginVertical: 2,
+  },
   routeInfo: { flex: 1, gap: 4 },
-  routeAddr: { fontSize: 14, fontWeight: '500', color: '#1c1c1e' },
-  routeTimeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, marginVertical: 2 },
-  routeTimeTxt: { fontSize: 12, color: '#8e8e93' },
+  routeAddr: { fontSize: 14, fontWeight: "500", color: "#1c1c1e" },
+  routeTimeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginVertical: 2,
+  },
+  routeTimeTxt: { fontSize: 12, color: "#8e8e93" },
   riderRideDelete: { padding: 4, marginLeft: 6 },
   incomingRequestBanner: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#EFF6FF', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8,
-    marginTop: 10, borderWidth: 1, borderColor: '#bfdbfe',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#EFF6FF",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
   },
-  incomingRequestLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
-  incomingRequestText: { fontSize: 13, color: '#1d4ed8', fontWeight: '500', flex: 1 },
-  incomingRequestAction: { flexDirection: 'row', alignItems: 'center', gap: 2, marginLeft: 8 },
-  incomingRequestActionText: { fontSize: 13, color: '#007AFF', fontWeight: '600' },
+  incomingRequestLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flex: 1,
+  },
+  incomingRequestText: {
+    fontSize: 13,
+    color: "#1d4ed8",
+    fontWeight: "500",
+    flex: 1,
+  },
+  incomingRequestAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    marginLeft: 8,
+  },
+  incomingRequestActionText: {
+    fontSize: 13,
+    color: "#007AFF",
+    fontWeight: "600",
+  },
 
   // ── Modals
   modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end',
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
   },
   modalSheet: {
-    backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingHorizontal: 24, paddingBottom: 40, paddingTop: 12, maxHeight: '80%',
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+    paddingTop: 12,
+    maxHeight: "80%",
   },
   sheetHandle: {
-    width: 40, height: 4, borderRadius: 2, backgroundColor: '#d1d1d6',
-    alignSelf: 'center', marginBottom: 16,
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#d1d1d6",
+    alignSelf: "center",
+    marginBottom: 16,
   },
   modalHeader: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
   },
-  modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#1c1c1e' },
+  modalTitle: { fontSize: 22, fontWeight: "bold", color: "#1c1c1e" },
 
   // ── Ride detail
   detailRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
     marginBottom: 14,
   },
-  detailText: { fontSize: 15, color: '#1c1c1e' },
-  actionRow: { flexDirection: 'row', gap: 12, marginTop: 20 },
+  detailText: { fontSize: 15, color: "#1c1c1e" },
+  actionRow: { flexDirection: "row", gap: 12, marginTop: 20 },
   denyButton: {
-    flex: 1, backgroundColor: '#FF3B30', borderRadius: 12,
-    padding: 14, alignItems: 'center',
+    flex: 1,
+    backgroundColor: "#FF3B30",
+    borderRadius: 12,
+    padding: 14,
+    alignItems: "center",
   },
   acceptButton: {
-    flex: 1, backgroundColor: '#34C759', borderRadius: 12,
-    padding: 14, alignItems: 'center',
+    flex: 1,
+    backgroundColor: "#34C759",
+    borderRadius: 12,
+    padding: 14,
+    alignItems: "center",
   },
   actionDisabled: { opacity: 0.6 },
-  actionText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  actionText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   confirmedBadge: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    marginTop: 20, gap: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 20,
+    gap: 8,
   },
-  confirmedText: { fontSize: 16, fontWeight: '600', color: '#34C759' },
+  confirmedText: { fontSize: 16, fontWeight: "600", color: "#34C759" },
   viewProfileButton: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, marginTop: 16, paddingVertical: 12, paddingHorizontal: 20,
-    borderRadius: 12, borderWidth: 1.5, borderColor: '#007AFF',
-    backgroundColor: '#EFF6FF',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#007AFF",
+    backgroundColor: "#EFF6FF",
   },
-  viewProfileText: { fontSize: 15, fontWeight: '600', color: '#007AFF' },
+  viewProfileText: { fontSize: 15, fontWeight: "600", color: "#007AFF" },
 
   // ── Form
   fieldLabel: {
-    fontSize: 13, fontWeight: '600', color: '#3c3c43', marginBottom: 6, marginTop: 16,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#3c3c43",
+    marginBottom: 6,
+    marginTop: 16,
   },
   textInput: {
-    backgroundColor: '#f2f2f7', borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 15, color: '#1c1c1e', borderWidth: 1, borderColor: '#e5e5ea',
+    backgroundColor: "#f2f2f7",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: "#1c1c1e",
+    borderWidth: 1,
+    borderColor: "#e5e5ea",
   },
-  addressInputRow: { flexDirection: 'row', alignItems: 'center' },
+  addressInputRow: { flexDirection: "row", alignItems: "center" },
   addressTextInput: { flex: 1 },
-  addressSpinner: { position: 'absolute', right: 12 },
+  addressSpinner: { position: "absolute", right: 12 },
   suggestionsList: {
-    marginTop: 4, backgroundColor: '#fff', borderRadius: 10,
-    borderWidth: 1, borderColor: '#e5e5ea', overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08, shadowRadius: 6, elevation: 3,
+    marginTop: 4,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#e5e5ea",
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
   },
   suggestionItem: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-    paddingVertical: 11, paddingHorizontal: 14,
-    borderBottomWidth: 1, borderBottomColor: '#f2f2f7',
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f2f2f7",
   },
   suggestionItemLast: { borderBottomWidth: 0 },
-  suggestionText: { flex: 1, fontSize: 14, color: '#1c1c1e', lineHeight: 19 },
+  suggestionText: { flex: 1, fontSize: 14, color: "#1c1c1e", lineHeight: 19 },
   dropdown: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: '#f2f2f7', borderWidth: 1, borderColor: '#e5e5ea',
-    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#f2f2f7",
+    borderWidth: 1,
+    borderColor: "#e5e5ea",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  dropdownText: { fontSize: 15, color: '#1c1c1e', flex: 1 },
+  dropdownText: { fontSize: 15, color: "#1c1c1e", flex: 1 },
   dropdownMenu: {
-    maxHeight: 180, backgroundColor: '#fff', borderWidth: 1,
-    borderColor: '#e5e5ea', borderRadius: 10, marginTop: 4, overflow: 'hidden',
+    maxHeight: 180,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#e5e5ea",
+    borderRadius: 10,
+    marginTop: 4,
+    overflow: "hidden",
   },
   dropdownItem: {
-    paddingVertical: 11, paddingHorizontal: 14,
-    borderBottomWidth: 1, borderBottomColor: '#f2f2f7',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f2f2f7",
   },
-  dropdownItemText: { fontSize: 14, color: '#1c1c1e' },
-  daysRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  dropdownItemText: { fontSize: 14, color: "#1c1c1e" },
+  daysRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   dayChip: {
-    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20,
-    backgroundColor: '#f2f2f7', borderWidth: 1.5, borderColor: '#e5e5ea',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: "#f2f2f7",
+    borderWidth: 1.5,
+    borderColor: "#e5e5ea",
   },
-  dayChipSelected: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  dayChipText: { fontSize: 13, fontWeight: '600', color: '#636366' },
-  dayChipTextSelected: { color: '#fff' },
+  dayChipSelected: { backgroundColor: "#007AFF", borderColor: "#007AFF" },
+  dayChipText: { fontSize: 13, fontWeight: "600", color: "#636366" },
+  dayChipTextSelected: { color: "#fff" },
   submitButton: {
-    flexDirection: 'row', backgroundColor: '#007AFF', borderRadius: 14,
-    padding: 16, alignItems: 'center', justifyContent: 'center',
-    marginTop: 28, gap: 8,
+    flexDirection: "row",
+    backgroundColor: "#007AFF",
+    borderRadius: 14,
+    padding: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 28,
+    gap: 8,
   },
   submitButtonDisabled: { opacity: 0.55 },
-  submitButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  submitButtonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
 
   // ── Custom Confirmation Modal
   confirmOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
     padding: 20,
   },
   confirmBox: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 16,
     padding: 24,
-    width: '100%',
+    width: "100%",
     maxWidth: 400,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -1700,45 +2550,45 @@ const styles = StyleSheet.create({
   },
   confirmTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1c1c1e',
+    fontWeight: "bold",
+    color: "#1c1c1e",
     marginBottom: 12,
-    textAlign: 'center',
+    textAlign: "center",
   },
   confirmMessage: {
     fontSize: 16,
-    color: '#636366',
+    color: "#636366",
     marginBottom: 24,
-    textAlign: 'center',
+    textAlign: "center",
     lineHeight: 22,
   },
   confirmButtons: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
   },
   confirmButton: {
     flex: 1,
     paddingVertical: 14,
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   confirmKeep: {
-    backgroundColor: '#f2f2f7',
+    backgroundColor: "#f2f2f7",
     borderWidth: 1,
-    borderColor: '#e5e5ea',
+    borderColor: "#e5e5ea",
   },
   confirmKeepText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#007AFF',
+    fontWeight: "600",
+    color: "#007AFF",
   },
   confirmCancel: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: "#FF3B30",
   },
   confirmCancelText: {
     fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
+    fontWeight: "700",
+    color: "#fff",
   },
 });
