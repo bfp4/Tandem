@@ -20,6 +20,7 @@ import {
   View,
 } from 'react-native';
 import { auth, db, storage } from '../../config/firebase';
+import { uriToBlob } from '../../utils/uriToBlob';
 
 type Role = 'driver' | 'rider';
 
@@ -88,8 +89,7 @@ export default function UserDetailsScreen() {
   };
 
   const uploadPhoto = async (uri: string, uid: string): Promise<string> => {
-    const response = await fetch(uri);
-    const blob = await response.blob();
+    const blob = await uriToBlob(uri);
     const storageRef = ref(storage, `profilePhotos/${uid}`);
     await uploadBytes(storageRef, blob);
     return await getDownloadURL(storageRef);

@@ -22,8 +22,8 @@ export interface User {
   phone: string;
   address: string;
   bio: string;
-  /** URL to Firebase Storage */
-  profilePhoto: string;
+  /** URL to Firebase Storage (may be missing on older user docs) */
+  profilePhoto?: string;
   /** At least one role required */
   roles: ('driver' | 'rider')[];
   activeRole: 'driver' | 'rider';

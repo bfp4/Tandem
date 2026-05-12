@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { doc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from '../../config/firebase';
+import { uriToBlob } from '../../utils/uriToBlob';
 
 export default function CarDetailsScreen() {
   const router = useRouter();
@@ -45,8 +46,7 @@ export default function CarDetailsScreen() {
   };
 
   const uploadCarPhoto = async (uri: string, uid: string): Promise<string> => {
-    const response = await fetch(uri);
-    const blob = await response.blob();
+    const blob = await uriToBlob(uri);
     const storageRef = ref(storage, `carPhotos/${uid}`);
     await uploadBytes(storageRef, blob);
     return await getDownloadURL(storageRef);

@@ -1,0 +1,36 @@
+rules_version = '2';
+
+// Paths used by the app:
+// - profilePhotos/{uid}     — signup + account profile photo
+// - carPhotos/{uid}         — signup car photo
+// - users/{uid}/car-photo.jpg — account car photo
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Max ~10 MB; blob uploads may omit image/* content-type, so we only cap size.
+    function isReasonableUpload() {
+      return request.resource.size < 10 * 1024 * 1024;
+    }
+
+    match /profilePhotos/{userId} {
+      allow read: if request.auth != null;
+      allow create, update: if isOwner(userId) && isReasonableUpload();
+      allow delete: if isOwner(userId);
+    }
+
+    match /carPhotos/{userId} {
+      allow read: if request.auth != null;
+      allow create, update: if isOwner(userId) && isReasonableUpload();
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow create, update: if isOwner(userId) && isReasonableUpload();
+      allow delete: if isOwner(userId);
+    }
+  }
+}

@@ -16,12 +16,15 @@ import {
   type RideRequestWithId,
 } from "@/services/rideRequestService";
 import { getRiderRides } from "@/services/riderRideService";
+import { aggregateRatingForUser } from "@/services/ratingService";
 import { getUser } from "@/services/userService";
 import type { RiderRide } from "@/types/riderRide";
 import type { User as AppUser } from "@/types/user";
 import { reverseGeocode } from "@/utils/geocoding";
+import { normalizeProfilePhotoUrl } from "@/utils/profilePhoto";
 import { fetchRouteWithSteps } from "@/utils/routing";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import {
@@ -331,6 +334,29 @@ function formatTime24to12(hhmm: string): string {
   const period = h < 12 ? "AM" : "PM";
   const hours = h % 12 === 0 ? 12 : h % 12;
   return `${hours}:${String(m).padStart(2, "0")} ${period}`;
+}
+
+/** Firestore / aggregates may expose rating as string or number. */
+function toDisplayStarRating(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.min(5, n)) : 0;
+}
+
+async function fetchOtherUserForRide(otherId: string): Promise<AppUser> {
+  try {
+    let u = await getUser(otherId);
+    try {
+      const agg = await aggregateRatingForUser(otherId);
+      if (agg && agg.count > 0) {
+        u = { ...u, starRating: agg.average, rideCount: agg.count };
+      }
+    } catch {
+      // keep starRating / rideCount from user doc
+    }
+    return u;
+  } catch {
+    return placeholderOtherUser(otherId);
+  }
 }
 
 function placeholderOtherUser(uid: string): AppUser {
@@ -644,13 +670,8 @@ function HomeScreenInner() {
             req.driverId === user.uid ? req.riderId : req.driverId;
           let otherUser = userCache.current.get(otherId);
           if (!otherUser) {
-            try {
-              otherUser = await getUser(otherId);
-              userCache.current.set(otherId, otherUser);
-            } catch {
-              otherUser = placeholderOtherUser(otherId);
-              userCache.current.set(otherId, otherUser);
-            }
+            otherUser = await fetchOtherUserForRide(otherId);
+            userCache.current.set(otherId, otherUser);
           }
 
           const pickupKey = `${pickup.latitude},${pickup.longitude}`;
@@ -840,17 +861,8 @@ function HomeScreenInner() {
               conf.driverId === user.uid ? conf.riderId : conf.driverId;
             let otherUser = userCache.current.get(otherId);
             if (!otherUser) {
-              try {
-                otherUser = await getUser(otherId);
-                userCache.current.set(otherId, otherUser);
-              } catch (e) {
-                homeRidesLog("getUser(other) failed, placeholder", {
-                  otherId,
-                  e,
-                });
-                otherUser = placeholderOtherUser(otherId);
-                userCache.current.set(otherId, otherUser);
-              }
+              otherUser = await fetchOtherUserForRide(otherId);
+              userCache.current.set(otherId, otherUser);
             }
 
             const pickupKey = `${pickup.latitude},${pickup.longitude}`;
@@ -1351,15 +1363,34 @@ function HomeScreenInner() {
     }
   };
 
+  const RidePartnerAvatar = ({ other }: { other: AppUser }) => {
+    const url = normalizeProfilePhotoUrl(other.profilePhoto);
+    return (
+      <View style={styles.avatarSmall}>
+        {url ? (
+          <Image
+            source={{ uri: url }}
+            style={styles.avatarSmallImage}
+            contentFit="cover"
+            transition={200}
+          />
+        ) : (
+          <Ionicons name="person" size={18} color="#999" />
+        )}
+      </View>
+    );
+  };
+
   const handleViewProfile = (otherUser: AppUser) => {
     router.push({
       pathname: "/driver-details",
       params: {
         id: otherUser.uid,
         name: otherUser.name,
-        rating: String(otherUser.starRating ?? 0),
+        rating: String(toDisplayStarRating(otherUser.starRating)),
         totalRides: String(otherUser.rideCount ?? 0),
         bio: otherUser.bio ?? "",
+        profilePhoto: normalizeProfilePhotoUrl(otherUser.profilePhoto),
       },
     });
   };
@@ -1516,15 +1547,13 @@ function HomeScreenInner() {
                 style={styles.profileRow}
                 onPress={() => handleViewProfile(ride.otherUser)}
               >
-                <View style={styles.avatarSmall}>
-                  <Ionicons name="person" size={18} color="#999" />
-                </View>
+                <RidePartnerAvatar other={ride.otherUser} />
                 <View style={styles.profileInfo}>
                   <Text style={styles.profileName}>{ride.otherUser.name}</Text>
                   <View style={styles.ratingRow}>
                     <Ionicons name="star" size={12} color="#FFB800" />
                     <Text style={styles.ratingText}>
-                      {(ride.otherUser.starRating ?? 0).toFixed(1)}
+                      {toDisplayStarRating(ride.otherUser.starRating).toFixed(1)}
                     </Text>
                   </View>
                 </View>
@@ -1817,9 +1846,7 @@ function HomeScreenInner() {
                   style={styles.profileRow}
                   onPress={() => handleViewProfile(ride.otherUser)}
                 >
-                  <View style={styles.avatarSmall}>
-                    <Ionicons name="person" size={18} color="#999" />
-                  </View>
+                  <RidePartnerAvatar other={ride.otherUser} />
                   <View style={styles.profileInfo}>
                     <Text style={styles.profileName}>
                       {ride.otherUser.name}
@@ -1827,7 +1854,7 @@ function HomeScreenInner() {
                     <View style={styles.ratingRow}>
                       <Ionicons name="star" size={12} color="#FFB800" />
                       <Text style={styles.ratingText}>
-                        {(ride.otherUser.starRating ?? 0).toFixed(1)}
+                        {toDisplayStarRating(ride.otherUser.starRating).toFixed(1)}
                       </Text>
                     </View>
                   </View>
@@ -2437,6 +2464,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F4F6",
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
+  },
+  avatarSmallImage: {
+    width: "100%",
+    height: "100%",
   },
   profileInfo: {
     flex: 1,

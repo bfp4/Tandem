@@ -3,8 +3,11 @@ import { getOrCreateConversation } from '@/services/messagingService';
 import type { RideMatchInfo } from '@/services/matchingService';
 import { createNotification } from '@/services/notificationService';
 import { aggregateRatingForUser } from '@/services/ratingService';
-import { createRideRequest } from '@/services/rideRequestService';
+import { cancelRideRequest, createRideRequest } from '@/services/rideRequestService';
+import { getUser } from '@/services/userService';
+import { normalizeProfilePhotoUrl } from '@/utils/profilePhoto';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { GeoPoint } from 'firebase/firestore';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -81,9 +84,15 @@ export default function DriverDetailsScreen() {
     return Number.isFinite(n) ? Math.max(0, n) : 0;
   });
 
-  const [requestedRideIds, setRequestedRideIds] = useState<Set<string>>(new Set());
+  /** Pending: maps riderRideId → Firestore rideRequests doc id (withdrawable). */
+  const [pendingRequestByRideId, setPendingRequestByRideId] = useState<
+    Record<string, string>
+  >({});
+  /** Confirmed match — show "Request Sent" with no cancel. */
+  const [confirmedRideIds, setConfirmedRideIds] = useState<Set<string>>(new Set());
   const [submittingRideId, setSubmittingRideId] = useState<string | null>(null);
   const [loadingRequests, setLoadingRequests] = useState(true);
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState('');
 
   const bio = (params.bio as string) || '';
   const distance = (params.distance as string) || '';
@@ -131,6 +140,29 @@ export default function DriverDetailsScreen() {
     void checkExistingRequests();
   }, [user, otherId]);
 
+  useEffect(() => {
+    if (!otherId?.trim()) return;
+    let cancelled = false;
+    const raw = params.profilePhoto;
+    const paramUrl = normalizeProfilePhotoUrl(
+      Array.isArray(raw) ? raw[0] : raw,
+    );
+    setProfilePhotoUrl(paramUrl);
+    void (async () => {
+      try {
+        const u = await getUser(otherId);
+        if (cancelled) return;
+        const fromDoc = normalizeProfilePhotoUrl(u.profilePhoto);
+        setProfilePhotoUrl(fromDoc || paramUrl);
+      } catch {
+        if (!cancelled) setProfilePhotoUrl(paramUrl);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [otherId, params.profilePhoto]);
+
   const checkExistingRequests = async () => {
     if (!user) return;
     try {
@@ -146,24 +178,38 @@ export default function DriverDetailsScreen() {
         getDocs(query(collection(db, 'rideRequests'), where('riderId', '==', riderId2))),
       ]);
 
-      const alreadyRequestedIds = new Set<string>();
-      snap1.docs.forEach(d => {
-        const data = d.data();
-        if (data.driverId === driverId1 &&
-            (data.status === 'pending' || data.status === 'confirmed') &&
-            data.riderRideId) {
-          alreadyRequestedIds.add(data.riderRideId as string);
-        }
-      });
-      snap2.docs.forEach(d => {
-        const data = d.data();
-        if (data.driverId === driverId2 &&
-            (data.status === 'pending' || data.status === 'confirmed') &&
-            data.riderRideId) {
-          alreadyRequestedIds.add(data.riderRideId as string);
-        }
-      });
-      setRequestedRideIds(alreadyRequestedIds);
+      const merged: Record<
+        string,
+        { pendingDocId?: string; confirmed?: boolean }
+      > = {};
+
+      const consider = (
+        data: {
+          driverId?: string;
+          riderRideId?: string;
+          status?: string;
+        },
+        docId: string,
+        driverIdExpected: string,
+      ) => {
+        if (data.driverId !== driverIdExpected || !data.riderRideId) return;
+        const rr = data.riderRideId as string;
+        if (!merged[rr]) merged[rr] = {};
+        if (data.status === 'pending') merged[rr].pendingDocId = docId;
+        if (data.status === 'confirmed') merged[rr].confirmed = true;
+      };
+
+      snap1.docs.forEach(d => consider(d.data(), d.id, driverId1));
+      snap2.docs.forEach(d => consider(d.data(), d.id, driverId2));
+
+      const pending: Record<string, string> = {};
+      const confirmed = new Set<string>();
+      for (const [rideId, m] of Object.entries(merged)) {
+        if (m.confirmed) confirmed.add(rideId);
+        else if (m.pendingDocId) pending[rideId] = m.pendingDocId;
+      }
+      setPendingRequestByRideId(pending);
+      setConfirmedRideIds(confirmed);
     } catch (e) {
       console.warn('Could not load existing requests:', e);
     } finally {
@@ -204,13 +250,49 @@ export default function DriverDetailsScreen() {
 
       await createNotification(notifyUserId, 'ride_requested', requestId, notifyMsg);
 
-      setRequestedRideIds(prev => new Set([...prev, ride.riderRideId]));
+      setPendingRequestByRideId(prev => ({ ...prev, [ride.riderRideId]: requestId }));
       Alert.alert('Request sent!', `Your match request has been sent to ${otherName}.`);
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Could not send match request.');
     } finally {
       setSubmittingRideId(null);
     }
+  };
+
+  const handleCancelPendingRequest = (ride: RideMatchInfo) => {
+    if (!user) return;
+    const requestId = pendingRequestByRideId[ride.riderRideId];
+    if (!requestId) return;
+
+    Alert.alert(
+      'Cancel request?',
+      `Withdraw your match request to ${otherName}?`,
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: 'Cancel request',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setSubmittingRideId(ride.riderRideId);
+              try {
+                await cancelRideRequest(requestId, user.uid);
+                setPendingRequestByRideId(prev => {
+                  const next = { ...prev };
+                  delete next[ride.riderRideId];
+                  return next;
+                });
+                Alert.alert('Request cancelled', 'Your match request was withdrawn.');
+              } catch (e: any) {
+                Alert.alert('Error', e.message ?? 'Could not cancel request.');
+              } finally {
+                setSubmittingRideId(null);
+              }
+            })();
+          },
+        },
+      ],
+    );
   };
 
   const handleMessage = async () => {
@@ -245,7 +327,16 @@ export default function DriverDetailsScreen() {
         {/* ── Profile ── */}
         <View style={styles.profileSection}>
           <View style={styles.avatarLarge}>
-            <Ionicons name="person" size={48} color="#999" />
+            {profilePhotoUrl ? (
+              <Image
+                source={{ uri: profilePhotoUrl }}
+                style={styles.avatarLargeImage}
+                contentFit="cover"
+                transition={200}
+              />
+            ) : (
+              <Ionicons name="person" size={48} color="#999" />
+            )}
           </View>
 
           <Text style={styles.driverName}>{otherName}</Text>
@@ -302,7 +393,7 @@ export default function DriverDetailsScreen() {
           <Text style={styles.sectionTitle}>Compatible Rides</Text>
           <Text style={styles.sectionSubtitle}>
             {matchingRides.length > 0
-              ? 'Tap a ride to send a match request.'
+              ? 'Tap a ride to send a match request. You can cancel while it\'s still pending.'
               : myRole === 'rider'
                 ? 'No schedule overlap yet. Add rides in your Schedule tab to find matches.'
                 : 'No schedule overlap yet. Add availability in your Schedule tab to find matches.'}
@@ -312,7 +403,8 @@ export default function DriverDetailsScreen() {
             <ActivityIndicator color="#007AFF" style={{ marginVertical: 16 }} />
           ) : (
             matchingRides.map((ride, i) => {
-              const alreadyRequested = requestedRideIds.has(ride.riderRideId);
+              const pendingRequestId = pendingRequestByRideId[ride.riderRideId];
+              const isConfirmed = confirmedRideIds.has(ride.riderRideId);
               const isSubmitting = submittingRideId === ride.riderRideId;
               return (
                 <View key={i} style={styles.rideCard}>
@@ -346,30 +438,51 @@ export default function DriverDetailsScreen() {
                     </View>
                   </View>
 
-                  <TouchableOpacity
-                    style={[
-                      styles.requestButton,
-                      alreadyRequested && styles.requestButtonSent,
-                      (isSubmitting || alreadyRequested) && styles.requestButtonDisabled,
-                    ]}
-                    onPress={() => handleRequestMatch(ride)}
-                    disabled={isSubmitting || alreadyRequested}
-                    activeOpacity={0.75}
-                  >
-                    {isSubmitting ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : alreadyRequested ? (
-                      <>
-                        <Ionicons name="checkmark-circle" size={16} color="#fff" />
-                        <Text style={styles.requestButtonText}>Request Sent</Text>
-                      </>
-                    ) : (
-                      <>
-                        <Ionicons name="paper-plane-outline" size={16} color="#fff" />
-                        <Text style={styles.requestButtonText}>Request Match</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
+                  {pendingRequestId && !isConfirmed ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.requestButtonCancel,
+                        isSubmitting && styles.requestButtonDisabled,
+                      ]}
+                      onPress={() => handleCancelPendingRequest(ride)}
+                      disabled={isSubmitting}
+                      activeOpacity={0.75}
+                    >
+                      {isSubmitting ? (
+                        <ActivityIndicator size="small" color="#FF3B30" />
+                      ) : (
+                        <>
+                          <Ionicons name="close-circle-outline" size={16} color="#FF3B30" />
+                          <Text style={styles.requestButtonCancelText}>Cancel request</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[
+                        styles.requestButton,
+                        isConfirmed && styles.requestButtonSent,
+                        (isSubmitting || isConfirmed) && styles.requestButtonDisabled,
+                      ]}
+                      onPress={() => handleRequestMatch(ride)}
+                      disabled={isSubmitting || isConfirmed}
+                      activeOpacity={0.75}
+                    >
+                      {isSubmitting ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : isConfirmed ? (
+                        <>
+                          <Ionicons name="checkmark-circle" size={16} color="#fff" />
+                          <Text style={styles.requestButtonText}>Request Sent</Text>
+                        </>
+                      ) : (
+                        <>
+                          <Ionicons name="paper-plane-outline" size={16} color="#fff" />
+                          <Text style={styles.requestButtonText}>Request Match</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
                 </View>
               );
             })
@@ -436,6 +549,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+    overflow: 'hidden',
+  },
+  avatarLargeImage: {
+    width: '100%',
+    height: '100%',
   },
   driverName: {
     fontSize: 26,
@@ -620,6 +738,22 @@ const styles = StyleSheet.create({
   },
   requestButtonText: {
     color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  requestButtonCancel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: '#FF3B30',
+    borderRadius: 10,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  requestButtonCancelText: {
+    color: '#FF3B30',
     fontSize: 14,
     fontWeight: '600',
   },

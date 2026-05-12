@@ -10,6 +10,7 @@ import type { ScheduleBlock } from '@/types/scheduleBlock';
 import type { User } from '@/types/user';
 import { calculateDriveTime, formatDriveTime } from '@/utils/driveTime';
 import { forwardGeocode } from '@/utils/geocoding';
+import { normalizeProfilePhotoUrl } from '@/utils/profilePhoto';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import {
@@ -450,6 +451,7 @@ export default function ScheduleScreen() {
         rating: (otherUser.starRating ?? 0).toString(),
         totalRides: (otherUser.rideCount ?? 0).toString(),
         bio: otherUser.bio ?? '',
+        profilePhoto: normalizeProfilePhotoUrl(otherUser.profilePhoto),
         distance: '0',
         score: '0',
         matchingRides: '[]',

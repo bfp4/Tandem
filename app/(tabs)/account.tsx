@@ -5,17 +5,13 @@ import {
 } from '@/services/authService';
 import { aggregateRatingForUser } from '@/services/ratingService';
 import {
-  getBlockedAccounts,
-  getFavorites,
   getUserHistoryBlocks,
-  removeBlockedAccount,
-  removeFavorite,
-  type SavedAccountRef,
   updateUser,
   updateUserPreferences,
 } from '@/services/userService';
 import type { HistoryBlock } from '@/types/historyBlock';
 import type { AppearancePreference, GenderPreference } from '@/types/user';
+import { uriToBlob } from '@/utils/uriToBlob';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -25,6 +21,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   ScrollView,
   StyleSheet,
@@ -57,6 +54,8 @@ export default function AccountScreen() {
   const [carPhotoPreview, setCarPhotoPreview] = useState('');
   const [carPhotoMessage, setCarPhotoMessage] = useState('');
   const [carPhotoUploading, setCarPhotoUploading] = useState(false);
+  const [profilePhoto, setProfilePhoto] = useState('');
+  const [profilePhotoUploading, setProfilePhotoUploading] = useState(false);
   const [accountCenterVisible, setAccountCenterVisible] = useState(false);
   const [accountCenterView, setAccountCenterView] = useState('menu');
   const [temporaryMessage, setTemporaryMessage] = useState('');
@@ -83,12 +82,6 @@ export default function AccountScreen() {
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
 
-  // App Activity (Favorites + Blocked Accounts)
-  const [favorites, setFavorites] = useState<SavedAccountRef[]>([]);
-  const [blockedAccounts, setBlockedAccounts] = useState<SavedAccountRef[]>([]);
-  const [activityLoading, setActivityLoading] = useState(false);
-  const [activityMessage, setActivityMessage] = useState('');
-
   // App Activity (Ride History)
   const [historyBlocks, setHistoryBlocks] = useState<HistoryBlock[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -103,34 +96,10 @@ export default function AccountScreen() {
 
   useEffect(() => {
     if (!accountCenterVisible) return;
-    if (accountCenterView !== 'activity') return;
-    void loadActivity();
-  }, [accountCenterVisible, accountCenterView, user?.uid]);
-
-  useEffect(() => {
-    if (!accountCenterVisible) return;
     if (accountCenterView !== 'activity_history') return;
     if (!user?.uid) return;
     void loadHistory();
   }, [accountCenterVisible, accountCenterView, user?.uid]);
-
-  const loadActivity = async () => {
-    if (!user?.uid) return;
-    setActivityLoading(true);
-    try {
-      const [fav, blocked] = await Promise.all([
-        getFavorites(user.uid),
-        getBlockedAccounts(user.uid),
-      ]);
-      setFavorites(fav);
-      setBlockedAccounts(blocked);
-    } catch (error: any) {
-      setActivityMessage(error?.message ? String(error.message) : 'Failed to load activity');
-      setTimeout(() => setActivityMessage(''), 3000);
-    } finally {
-      setActivityLoading(false);
-    }
-  };
 
   const loadHistory = async () => {
     if (!user?.uid) return;
@@ -223,6 +192,8 @@ export default function AccountScreen() {
           setCreatedAtText('');
         }
 
+        setProfilePhoto(typeof data.profilePhoto === 'string' ? data.profilePhoto : '');
+
         if (data.carDetails) {
           setCarModel(data.carDetails.model || '');
           setLicensePlate(data.carDetails.licensePlate || '');
@@ -270,6 +241,7 @@ export default function AccountScreen() {
       await setDoc(docRef, { 
         name: name.trim(),
         bio: bio.trim(),
+        profilePhoto: profilePhoto.trim(),
         carDetails: {
           model: carModel,
           licensePlate,
@@ -412,9 +384,58 @@ export default function AccountScreen() {
     setTemporaryMessage('Payout method is not connected yet.');
     setTimeout(() => setTemporaryMessage(''), 2500);
   };
-  const handleEditPhotoPress = () => {
-    setPhotoMessage('Profile photo upload is not connected yet.'  
-    );
+  const handlePickProfilePhoto = async () => {
+    try {
+      setPhotoMessage('');
+      if (!user?.uid) return;
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setPhotoMessage('Photo library permission is required to select a profile photo.');
+        setTimeout(() => setPhotoMessage(''), 3000);
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+
+      if (result.canceled) return;
+      const uri = result.assets?.[0]?.uri;
+      if (!uri) {
+        setPhotoMessage('Could not read selected image.');
+        setTimeout(() => setPhotoMessage(''), 3000);
+        return;
+      }
+
+      setProfilePhotoUploading(true);
+      setPhotoMessage('Uploading profile photo...');
+
+      const photoRef = ref(storage, `profilePhotos/${user.uid}`);
+      const blob = await uriToBlob(uri);
+      await uploadBytes(photoRef, blob);
+      const downloadURL = await getDownloadURL(photoRef);
+
+      setProfilePhoto(downloadURL);
+      setPhotoMessage('Profile photo uploaded. Tap “Save Profile” to save it to your account.');
+      setTimeout(() => setPhotoMessage(''), 4000);
+    } catch (error: any) {
+      const raw = error?.message ? String(error.message) : '';
+      const isPermission =
+        raw.toLowerCase().includes('permission') ||
+        raw.toLowerCase().includes('unauthorized') ||
+        raw.toLowerCase().includes('storage/unauthorized');
+      setPhotoMessage(
+        isPermission
+          ? 'Profile photo could not be uploaded (Storage permissions).'
+          : raw || 'Profile photo could not be uploaded.',
+      );
+      setTimeout(() => setPhotoMessage(''), 4000);
+    } finally {
+      setProfilePhotoUploading(false);
+    }
   };
 
   const handlePickCarPhoto = async () => {
@@ -447,8 +468,7 @@ export default function AccountScreen() {
       setCarPhotoMessage('Uploading car photo...');
 
       const carPhotoRef = ref(storage, `users/${user.uid}/car-photo.jpg`);
-      const response = await fetch(uri);
-      const blob = await response.blob();
+      const blob = await uriToBlob(uri);
       await uploadBytes(carPhotoRef, blob);
       const downloadURL = await getDownloadURL(carPhotoRef);
 
@@ -472,34 +492,6 @@ export default function AccountScreen() {
   };
   const handlePurchaseHistoryPress = () => {
     setAccountCenterView('activity_history');
-  };
-
-  const handleRemoveFavorite = async (targetUid: string) => {
-    if (!user?.uid) return;
-    try {
-      await removeFavorite(user.uid, targetUid);
-      setFavorites((prev) => prev.filter((f) => f.targetUid !== targetUid));
-      setActivityMessage('Removed from favorites');
-      setTimeout(() => setActivityMessage(''), 2000);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      setActivityMessage(`Failed to remove favorite: ${message}`);
-      setTimeout(() => setActivityMessage(''), 3000);
-    }
-  };
-
-  const handleUnblockAccount = async (targetUid: string) => {
-    if (!user?.uid) return;
-    try {
-      await removeBlockedAccount(user.uid, targetUid);
-      setBlockedAccounts((prev) => prev.filter((b) => b.targetUid !== targetUid));
-      setActivityMessage('Unblocked account');
-      setTimeout(() => setActivityMessage(''), 2000);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      setActivityMessage(`Failed to unblock account: ${message}`);
-      setTimeout(() => setActivityMessage(''), 3000);
-    }
   };
 
   const handleNotificationsSettingsPress = () => {
@@ -561,10 +553,6 @@ export default function AccountScreen() {
     setAccountCenterView('payment');
   };
 
-  const handleOpenAppActivity = () => {
-    setAccountCenterView('activity');
-  };
-
   const handleOpenPreferences = () => {
     setAccountCenterView('preferences');
   };
@@ -575,10 +563,6 @@ export default function AccountScreen() {
 
   const handleBackToPreferencesMenu = () => {
     setAccountCenterView('preferences');
-  };
-
-  const handleBackToAppActivity = () => {
-    setAccountCenterView('activity');
   };
 
   const handleSavePreferences = async () => {
@@ -636,10 +620,22 @@ export default function AccountScreen() {
         <View style={styles.profileHeaderRow}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
-              <Ionicons name="person" size={48} color="#999" />
+              {profilePhoto ? (
+                <Image source={{ uri: profilePhoto }} style={styles.avatarImage} contentFit="cover" />
+              ) : (
+                <Ionicons name="person" size={48} color="#999" />
+              )}
             </View>
-            <TouchableOpacity style={styles.editAvatarButton} onPress={handleEditPhotoPress}>
-              <Ionicons name="camera" size={20} color="#007AFF" />
+            <TouchableOpacity
+              style={styles.editAvatarButton}
+              onPress={handlePickProfilePhoto}
+              disabled={profilePhotoUploading}
+            >
+              {profilePhotoUploading ? (
+                <ActivityIndicator size="small" color="#007AFF" />
+              ) : (
+                <Ionicons name="camera" size={20} color="#007AFF" />
+              )}
             </TouchableOpacity>
           </View>
 
@@ -816,7 +812,7 @@ export default function AccountScreen() {
         <TouchableOpacity 
           style={styles.saveButton} 
           onPress={handleSaveProfile}
-          disabled={loading || carPhotoUploading}
+          disabled={loading || carPhotoUploading || profilePhotoUploading}
         >
           <Ionicons name="save" size={20} color="#fff" />
           <Text style={styles.saveButtonText}>
@@ -861,8 +857,8 @@ export default function AccountScreen() {
                   <Text style={styles.modalMenuText}>Payment / Financial</Text>
                   <Ionicons name="chevron-forward" size={20} color="#999" />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handleOpenAppActivity}>
-                  <Text style={styles.modalMenuText}>App Activity</Text>
+                <TouchableOpacity style={styles.modalMenuItem} onPress={handlePurchaseHistoryPress}>
+                  <Text style={styles.modalMenuText}>Purchase History / Ride History</Text>
                   <Ionicons name="chevron-forward" size={20} color="#999" />
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.modalMenuItem} onPress={handleOpenPreferences}>
@@ -1154,80 +1150,12 @@ export default function AccountScreen() {
                 </TouchableOpacity>
               </>
             )}
-           
-           {accountCenterView === 'activity' && (
+
+            {accountCenterView === 'activity_history' && (
               <>
                 <TouchableOpacity style={styles.backRow} onPress={handleBackToAccountCenterMenu}>
                   <Ionicons name="chevron-back" size={20} color="#6366F1" />
                   <Text style={styles.backRowText}>Back to Account Center</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.subSectionTitle}>App Activity</Text>
-
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handlePurchaseHistoryPress}>
-                  <Text style={styles.modalMenuText}>Purchase History / Ride History</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.modalMenuItem}
-                  onPress={() => setAccountCenterView('activity_favorites')}
-                >
-                  <Text style={styles.modalMenuText}>Favorites</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.modalMenuItem}
-                  onPress={() => setAccountCenterView('activity_blocked')}
-                >
-                  <Text style={styles.modalMenuText}>Blocked Accounts</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-              </>             
-            )} 
-
-            {accountCenterView === 'activity_favorites' && (
-              <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToAppActivity}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to App Activity</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.subSectionTitle}>Favorites</Text>
-
-                {activityMessage ? (
-                  <Text style={styles.activityMessage}>{activityMessage}</Text>
-                ) : null}
-
-                {activityLoading ? (
-                  <Text style={styles.activitySubtle}>Loading...</Text>
-                ) : favorites.length === 0 ? (
-                  <Text style={styles.activitySubtle}>No favorites yet.</Text>
-                ) : (
-                  favorites.map((f) => (
-                    <View key={f.targetUid} style={styles.activityRow}>
-                      <View style={styles.activityRowLeft}>
-                        <Text style={styles.activityName}>{f.name}</Text>
-                        <Text style={styles.activityRole}>{f.activeRole ?? '—'}</Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.activityActionButton}
-                        onPress={() => handleRemoveFavorite(f.targetUid)}
-                      >
-                        <Text style={styles.activityActionText}>Remove</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))
-                )}
-              </>
-            )}
-
-            {accountCenterView === 'activity_history' && (
-              <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToAppActivity}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to App Activity</Text>
                 </TouchableOpacity>
 
                 <Text style={styles.subSectionTitle}>Ride History</Text>
@@ -1432,41 +1360,6 @@ export default function AccountScreen() {
               </>
             )}
 
-            {accountCenterView === 'activity_blocked' && (
-              <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToAppActivity}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to App Activity</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.subSectionTitle}>Blocked Accounts</Text>
-
-                {activityMessage ? (
-                  <Text style={styles.activityMessage}>{activityMessage}</Text>
-                ) : null}
-
-                {activityLoading ? (
-                  <Text style={styles.activitySubtle}>Loading...</Text>
-                ) : blockedAccounts.length === 0 ? (
-                  <Text style={styles.activitySubtle}>No blocked accounts.</Text>
-                ) : (
-                  blockedAccounts.map((b) => (
-                    <View key={b.targetUid} style={styles.activityRow}>
-                      <View style={styles.activityRowLeft}>
-                        <Text style={styles.activityName}>{b.name}</Text>
-                        <Text style={styles.activityRole}>{b.activeRole ?? '—'}</Text>
-                      </View>
-                      <TouchableOpacity
-                        style={[styles.activityActionButton, styles.activityUnblockButton]}
-                        onPress={() => handleUnblockAccount(b.targetUid)}
-                      >
-                        <Text style={styles.activityActionText}>Unblock</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))
-                )}
-              </>
-            )}
             {accountCenterView === 'preferences' && (
               <>
                 <TouchableOpacity style={styles.backRow} onPress={handleBackToAccountCenterMenu}>
@@ -1688,6 +1581,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   editAvatarButton: {
     position: 'absolute',
@@ -2069,9 +1967,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     borderWidth: 1,
     borderColor: '#e5e5e5',
-  },
-  activityUnblockButton: {
-    backgroundColor: '#f5f5f5',
   },
   activityActionText: {
     fontSize: 13,

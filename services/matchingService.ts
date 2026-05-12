@@ -1,12 +1,12 @@
-import { db } from '@/config/firebase';
-import type { RideRequest } from '@/types/rideRequest';
-import type { RiderRide } from '@/types/riderRide';
-import type { ScheduleBlock } from '@/types/scheduleBlock';
-import type { User } from '@/types/user';
-import { distanceBetween } from 'geofire-common';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { aggregateRatingForUser } from './ratingService';
-import { getAllDrivers, getAllRiders, getUser } from './userService';
+import { db } from "@/config/firebase";
+import type { RideRequest } from "@/types/rideRequest";
+import type { RiderRide } from "@/types/riderRide";
+import type { ScheduleBlock } from "@/types/scheduleBlock";
+import type { User } from "@/types/user";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { distanceBetween } from "geofire-common";
+import { aggregateRatingForUser } from "./ratingService";
+import { getUser } from "./userService";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -14,14 +14,20 @@ const MILES_TO_KM = 1.60934;
 const DEFAULT_MAX_DISTANCE_MILES = 25;
 
 const DAY_NUM: Record<number, string> = {
-  0: 'Sun', 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat',
+  0: "Sun",
+  1: "Mon",
+  2: "Tue",
+  3: "Wed",
+  4: "Thu",
+  5: "Fri",
+  6: "Sat",
 };
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
 /** "HH:MM" → minutes since midnight */
 function toMin(hhmm: string): number {
-  const [h, m] = hhmm.split(':').map(Number);
+  const [h, m] = hhmm.split(":").map(Number);
   return h * 60 + m;
 }
 
@@ -29,7 +35,7 @@ function toMin(hhmm: string): number {
 function minToHHMM(min: number): string {
   const h = Math.floor(min / 60) % 24;
   const m = min % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
 /** Case-insensitive prefix comparison for day names ("Mon" == "Monday" == "MON") */
@@ -39,7 +45,7 @@ function daysMatch(a: string, b: string): boolean {
 
 /** Check whether a repeatDays array contains a given day */
 function listHasDay(list: string[] | null | undefined, day: string): boolean {
-  return (list ?? []).some(d => daysMatch(d, day));
+  return (list ?? []).some((d) => daysMatch(d, day));
 }
 
 /**
@@ -53,7 +59,7 @@ function effectiveDays(
   date: string | null | undefined,
 ): string[] {
   if (repeating && repeatDays && repeatDays.length > 0) return repeatDays;
-  if (date) return [DAY_NUM[new Date(date + 'T00:00:00').getDay()]];
+  if (date) return [DAY_NUM[new Date(date + "T00:00:00").getDay()]];
   return [];
 }
 
@@ -78,7 +84,11 @@ function blockCoversRide(
   rideStartMin: number,
   _rideEndMin: number,
 ): boolean {
-  if (!effectiveDays(block.repeating, block.repeatDays, block.date).some(d => daysMatch(d, day))) {
+  if (
+    !effectiveDays(block.repeating, block.repeatDays, block.date).some((d) =>
+      daysMatch(d, day),
+    )
+  ) {
     return false;
   }
   const blockStart = toMin(block.startTime);
@@ -108,7 +118,7 @@ function requestConflicts(
 
   // Skip one-off confirmed rides that occurred in the past.
   if (!req.repeating && req.date) {
-    const rideDay = new Date(req.date + 'T23:59:59');
+    const rideDay = new Date(req.date + "T23:59:59");
     if (rideDay < now) return false;
   }
 
@@ -117,7 +127,11 @@ function requestConflicts(
     if (req.repeatEndsAt.toDate() < now) return false;
   }
 
-  if (!effectiveDays(req.repeating, req.repeatDays, req.date).some(d => daysMatch(d, day))) {
+  if (
+    !effectiveDays(req.repeating, req.repeatDays, req.date).some((d) =>
+      daysMatch(d, day),
+    )
+  ) {
     return false;
   }
   const reqStart = toMin(req.requestedStart);
@@ -178,7 +192,7 @@ export async function getMatchedUsers(
   userLng: number | null = null,
   maxDistanceMiles: number = DEFAULT_MAX_DISTANCE_MILES,
 ): Promise<MatchResult[]> {
-  if (currentUser.activeRole === 'rider') {
+  if (currentUser.activeRole === "rider") {
     return findDriversForRider(currentUser, userLat, userLng, maxDistanceMiles);
   }
   return findRidersForDriver(currentUser, maxDistanceMiles);
@@ -194,29 +208,29 @@ async function findDriversForRider(
 ): Promise<MatchResult[]> {
   // 1. Fetch the rider's active scheduled rides (single-field query, no composite index).
   const riderRidesSnap = await getDocs(
-    query(collection(db, 'riderRides'), where('userId', '==', rider.uid)),
+    query(collection(db, "riderRides"), where("userId", "==", rider.uid)),
   );
   const riderRides = riderRidesSnap.docs
-    .map(d => ({ ...(d.data() as RiderRide), id: d.id }))
-    .filter(r => r.status === 'active' && r.repeatDays.length > 0);
+    .map((d) => ({ ...(d.data() as RiderRide), id: d.id }))
+    .filter((r) => r.status === "active" && r.repeatDays.length > 0);
   // Note: we continue even if riderRides is empty — the rider should still see
   // available drivers so they know who to request once they add rides.
 
   // 2. Fetch all open driver schedule blocks (single-field query, no composite index).
   const blocksSnap = await getDocs(
-    query(collection(db, 'scheduleBlocks'), where('role', '==', 'driver')),
+    query(collection(db, "scheduleBlocks"), where("role", "==", "driver")),
   );
   const allBlocks = blocksSnap.docs
-    .map(d => d.data() as ScheduleBlock)
-    .filter(b => b.status === 'open');
+    .map((d) => d.data() as ScheduleBlock)
+    .filter((b) => b.status === "open");
 
   if (allBlocks.length === 0) return [];
 
   // 3. Fetch confirmed ride requests to check which driver windows are already booked.
   const confirmedSnap = await getDocs(
-    query(collection(db, 'rideRequests'), where('status', '==', 'confirmed')),
+    query(collection(db, "rideRequests"), where("status", "==", "confirmed")),
   );
-  const confirmedRides = confirmedSnap.docs.map(d => d.data() as RideRequest);
+  const confirmedRides = confirmedSnap.docs.map((d) => d.data() as RideRequest);
 
   // 4. Group blocks and confirmations by driver (exclude the current user).
   const blocksByDriver = new Map<string, ScheduleBlock[]>();
@@ -249,7 +263,14 @@ async function findDriversForRider(
   // 6. Fetch driver profiles and build results.
   // Distance is measured from the rider's current GPS location (if available) to each
   // ride's pickup coords; falls back to the driver's profile location.
-  const results = await buildResults(candidates, 'driverId', userLat, userLng, maxDistanceMiles, rider.uid);
+  const results = await buildResults(
+    candidates,
+    "driverId",
+    userLat,
+    userLng,
+    maxDistanceMiles,
+    rider.uid,
+  );
   results.sort((a, b) => b.score - a.score);
   return results;
 }
@@ -263,30 +284,30 @@ async function findRidersForDriver(
   // 1. Fetch the driver's own availability blocks.
   //    Single-field filter (userId only) — no composite index needed.
   const blocksSnap = await getDocs(
-    query(collection(db, 'scheduleBlocks'), where('userId', '==', driver.uid)),
+    query(collection(db, "scheduleBlocks"), where("userId", "==", driver.uid)),
   );
   const driverBlocks = blocksSnap.docs
-    .map(d => d.data() as ScheduleBlock)
-    .filter(b => b.role === 'driver' && b.status === 'open');
+    .map((d) => d.data() as ScheduleBlock)
+    .filter((b) => b.role === "driver" && b.status === "open");
   if (driverBlocks.length === 0) return [];
 
   // 2. Fetch the driver's confirmed rides.
   //    Single-field filter (driverId only) — no composite index needed.
   const confirmedSnap = await getDocs(
-    query(collection(db, 'rideRequests'), where('driverId', '==', driver.uid)),
+    query(collection(db, "rideRequests"), where("driverId", "==", driver.uid)),
   );
   const driverConfirmed = confirmedSnap.docs
-    .map(d => d.data() as RideRequest)
-    .filter(r => r.status === 'confirmed');
+    .map((d) => d.data() as RideRequest)
+    .filter((r) => r.status === "confirmed");
 
   // 3. Fetch all active rider rides.
   //    Single-field filter (status only) — uses Firestore's automatic index.
   const riderRidesSnap = await getDocs(
-    query(collection(db, 'riderRides'), where('status', '==', 'active')),
+    query(collection(db, "riderRides"), where("status", "==", "active")),
   );
   const allRiderRides = riderRidesSnap.docs
-    .map(d => ({ ...(d.data() as RiderRide), id: d.id }))
-    .filter(r => r.userId !== driver.uid && r.repeatDays.length > 0);
+    .map((d) => ({ ...(d.data() as RiderRide), id: d.id }))
+    .filter((r) => r.userId !== driver.uid && r.repeatDays.length > 0);
   // Rides with null estimatedDurationMinutes are kept — treated as 0-minute duration.
 
   // 4. Group by rider userId
@@ -301,7 +322,11 @@ async function findRidersForDriver(
   const candidates: { riderId: string; matchingRides: RideMatchInfo[] }[] = [];
 
   for (const [riderId, rides] of ridesByRider) {
-    const matchingRides = computeMatchingRides(rides, driverBlocks, driverConfirmed);
+    const matchingRides = computeMatchingRides(
+      rides,
+      driverBlocks,
+      driverConfirmed,
+    );
     // Only include riders who have at least one overlapping time window
     if (matchingRides.length > 0) {
       candidates.push({ riderId, matchingRides });
@@ -310,10 +335,13 @@ async function findRidersForDriver(
 
   // 6. Fetch rider profiles in parallel and build results.
   // Distance is measured from the driver's profile location to each ride's pickup coords.
-  const mappedCandidates = candidates.map(c => ({ driverId: c.riderId, matchingRides: c.matchingRides }));
+  const mappedCandidates = candidates.map((c) => ({
+    driverId: c.riderId,
+    matchingRides: c.matchingRides,
+  }));
   const results = await buildResults(
     mappedCandidates,
-    'riderId',
+    "riderId",
     driver.lat ?? null,
     driver.lng ?? null,
     maxDistanceMiles,
@@ -349,11 +377,15 @@ function computeMatchingRides(
       if (seen.has(key)) continue;
 
       // Driver must be available at the ride's departure time.
-      const covered = driverBlocks.some(b => blockCoversRide(b, day, startMin, endMin));
+      const covered = driverBlocks.some((b) =>
+        blockCoversRide(b, day, startMin, endMin),
+      );
       if (!covered) continue;
 
       // Must not conflict with any confirmed driver booking on that day
-      const conflicts = driverConfirmedRides.some(r => requestConflicts(r, day, startMin, endMin));
+      const conflicts = driverConfirmedRides.some((r) =>
+        requestConflicts(r, day, startMin, endMin),
+      );
       if (conflicts) continue;
 
       seen.add(key);
@@ -444,8 +476,18 @@ async function buildResults(
         }
       }
 
-      const score = computeScore(profileUser, matchingRides.length, distanceMiles, maxDistanceMiles);
-      return { user: profileUser, score, distanceMiles, matchingRides } satisfies MatchResult;
+      const score = computeScore(
+        profileUser,
+        matchingRides.length,
+        distanceMiles,
+        maxDistanceMiles,
+      );
+      return {
+        user: profileUser,
+        score,
+        distanceMiles,
+        matchingRides,
+      } satisfies MatchResult;
     }),
   );
 
@@ -467,7 +509,7 @@ function computeScore(
   maxDistanceMiles: number,
 ): number {
   const rawRating =
-    typeof user.starRating === 'number' && Number.isFinite(user.starRating)
+    typeof user.starRating === "number" && Number.isFinite(user.starRating)
       ? user.starRating
       : Number(user.starRating);
   const cappedRating = Number.isFinite(rawRating)
@@ -475,6 +517,7 @@ function computeScore(
     : 0;
   const ratingScore = (cappedRating / 5.0) * 0.4;
   const ridesScore = (Math.min(matchingRidesCount, 5) / 5) * 0.4;
-  const distanceScore = (1 - Math.min(distanceMiles, maxDistanceMiles) / maxDistanceMiles) * 0.2;
+  const distanceScore =
+    (1 - Math.min(distanceMiles, maxDistanceMiles) / maxDistanceMiles) * 0.2;
   return ratingScore + ridesScore + distanceScore;
 }
