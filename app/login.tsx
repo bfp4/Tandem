@@ -13,68 +13,11 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { signInWithEmail, signUpWithEmail } from '../services/authService';
+import { getAuthErrorMessage, getSignUpPasswordError } from '@/utils/authErrors';
 import { useRouter } from 'expo-router';
+import { ACCENT, TEXT_INVERSE, TEXT_MUTED, TEXT_PRIMARY } from '@/utils/constants';
 
 type Mode = 'landing' | 'login' | 'signup';
-
-function getSignUpPasswordError(password: string): string | null {
-  if (password.length < 8) {
-    return 'Password must be at least 8 characters long';
-  }
-  if (!/[A-Z]/.test(password)) {
-    return 'Password must include an uppercase letter';
-  }
-  if (!/[^A-Za-z]/.test(password)) {
-    return 'Password must include a number or symbol (non-letter)';
-  }
-  return null;
-}
-
-function getAuthErrorMessage(error: unknown, mode: 'login' | 'signup'): string {
-  const code: string | undefined =
-    typeof error === 'object' && error !== null && 'code' in error
-      ? String((error as { code?: unknown }).code ?? '')
-      : undefined;
-
-  switch (code) {
-    case 'auth/invalid-email':
-      return 'That email address is not valid.';
-    case 'auth/email-already-in-use':
-      return 'An account with this email already exists. Try signing in instead.';
-    case 'auth/weak-password':
-      return 'That password is too weak. Please choose a stronger one.';
-    case 'auth/missing-password':
-      return 'Please enter your password.';
-    case 'auth/missing-email':
-      return 'Please enter your email address.';
-    case 'auth/user-disabled':
-      return 'This account has been disabled. Please contact support.';
-    case 'auth/user-not-found':
-    case 'auth/wrong-password':
-    case 'auth/invalid-credential':
-    case 'auth/invalid-login-credentials':
-      return 'The email or password you entered is incorrect.';
-    case 'auth/too-many-requests':
-      return 'Too many attempts. Please wait a moment and try again.';
-    case 'auth/network-request-failed':
-      return 'Network error. Check your connection and try again.';
-    case 'auth/operation-not-allowed':
-      return 'Email sign-in is currently disabled. Please try another method.';
-    case 'auth/popup-closed-by-user':
-    case 'auth/cancelled-popup-request':
-      return 'Sign-in was cancelled. Please try again.';
-  }
-
-  const message =
-    typeof error === 'object' && error !== null && 'message' in error
-      ? String((error as { message?: unknown }).message ?? '')
-      : '';
-  if (message) return message;
-
-  return mode === 'login'
-    ? 'Could not sign in. Please try again.'
-    : 'Could not create your account. Please try again.';
-}
 
 export default function LoginScreen() {
   const [mode, setMode] = useState<Mode>('landing');
@@ -183,7 +126,7 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <TouchableOpacity style={styles.backButton} onPress={() => switchMode('landing')}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
+          <Ionicons name="arrow-back" size={24} color={TEXT_PRIMARY} />
         </TouchableOpacity>
 
         <View style={styles.formSection}>
@@ -204,7 +147,7 @@ export default function LoginScreen() {
             }}
             autoCapitalize="none"
             keyboardType="email-address"
-            placeholderTextColor="#999"
+            placeholderTextColor={TEXT_MUTED}
           />
           <View style={styles.passwordContainer}>
             <TextInput
@@ -216,7 +159,7 @@ export default function LoginScreen() {
                 clearError();
               }}
               secureTextEntry={!showPassword}
-              placeholderTextColor="#999"
+              placeholderTextColor={TEXT_MUTED}
             />
             <TouchableOpacity
               style={styles.eyeButton}
@@ -241,7 +184,7 @@ export default function LoginScreen() {
                   clearError();
                 }}
                 secureTextEntry={!showConfirmPassword}
-                placeholderTextColor="#999"
+                placeholderTextColor={TEXT_MUTED}
               />
               <TouchableOpacity
                 style={styles.eyeButton}
@@ -275,7 +218,7 @@ export default function LoginScreen() {
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={TEXT_INVERSE} />
             ) : (
               <Text style={styles.primaryButtonText}>
                 {mode === 'login' ? 'Sign In' : 'Create Account'}
@@ -298,7 +241,6 @@ export default function LoginScreen() {
     </KeyboardAvoidingView>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -395,7 +337,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   primaryButtonText: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -406,7 +348,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   secondaryButtonText: {
-    color: '#333',
+    color: TEXT_PRIMARY,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -435,8 +377,9 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   switchLinkText: {
-    color: '#007AFF',
+    color: ACCENT,
     fontSize: 14,
     fontWeight: '500',
   },
 });
+

@@ -4,6 +4,7 @@ import React, { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
+import { ACCENT } from '@/utils/constants';
 
 export default function Index() {
   const { user, loading } = useAuth();
@@ -38,11 +39,10 @@ export default function Index() {
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color="#007AFF" />
+      <ActivityIndicator size="large" color={ACCENT} />
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -51,3 +51,4 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
 });
+

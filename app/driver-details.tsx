@@ -1,3 +1,5 @@
+import RouteAddressBlock from '@/components/RouteAddressBlock';
+import StarRating from '@/components/StarRating';
 import { useAuth } from '@/context/AuthContext';
 import { getOrCreateConversation } from '@/services/messagingService';
 import type { RideMatchInfo } from '@/services/matchingService';
@@ -6,6 +8,8 @@ import { aggregateRatingForUser } from '@/services/ratingService';
 import { cancelRideRequest, createRideRequest } from '@/services/rideRequestService';
 import { getUser } from '@/services/userService';
 import { normalizeProfilePhotoUrl } from '@/utils/profilePhoto';
+import { format12h } from '@/utils/format12h';
+import { FULL_DAY, nextDateForDay } from '@/utils/scheduleDays';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { GeoPoint } from 'firebase/firestore';
@@ -22,49 +26,7 @@ import {
   View,
 } from 'react-native';
 import { db } from '../config/firebase';
-
-const FULL_DAY: Record<string, string> = {
-  Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday',
-  Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday',
-};
-
-function format12h(hhmm: string): string {
-  const [h, m] = hhmm.split(':').map(Number);
-  const period = h < 12 ? 'AM' : 'PM';
-  const hours = h % 12 === 0 ? 12 : h % 12;
-  return `${hours}:${String(m).padStart(2, '0')} ${period}`;
-}
-
-/**
- * "YYYY-MM-DD" of the soonest occurrence of a short day name ("Mon", etc.).
- * Includes today if today matches the target day AND `departureTime` (HH:MM, 24h)
- * has not yet passed; otherwise rolls to the same weekday next week.
- */
-function nextDateForDay(dayShort: string, departureTime?: string): string {
-  const DAY_MAP: Record<string, number> = {
-    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
-  };
-  const target = DAY_MAP[dayShort] ?? 0;
-  const now = new Date();
-  let daysAhead = (target - now.getDay() + 7) % 7;
-
-  if (daysAhead === 0 && departureTime) {
-    const [h, m] = departureTime.split(':').map((n) => parseInt(n, 10));
-    const departureToday = new Date(now);
-    departureToday.setHours(h || 0, m || 0, 0, 0);
-    if (departureToday.getTime() <= now.getTime()) {
-      daysAhead = 7;
-    }
-  }
-
-  const d = new Date(now);
-  d.setDate(now.getDate() + daysAhead);
-  // Format as LOCAL YYYY-MM-DD (avoid toISOString which converts to UTC and can shift the day)
-  const y = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, '0');
-  const da = String(d.getDate()).padStart(2, '0');
-  return `${y}-${mo}-${da}`;
-}
+import { ACCENT, PLACEHOLDER, RED, STAR_COLOR, TEXT_INVERSE, TEXT_MUTED, TEXT_PRIMARY, TEXT_TERTIARY } from '@/utils/constants';
 
 export default function DriverDetailsScreen() {
   const router = useRouter();
@@ -317,7 +279,7 @@ export default function DriverDetailsScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
+          <Ionicons name="arrow-back" size={24} color={TEXT_PRIMARY} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{profileLabel}</Text>
         <View style={styles.placeholder} />
@@ -335,7 +297,7 @@ export default function DriverDetailsScreen() {
                 transition={200}
               />
             ) : (
-              <Ionicons name="person" size={48} color="#999" />
+              <Ionicons name="person" size={48} color={TEXT_MUTED} />
             )}
           </View>
 
@@ -343,19 +305,23 @@ export default function DriverDetailsScreen() {
 
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Ionicons name="star" size={18} color="#FFB800" />
-              <Text style={styles.statValue}>{displayRating.toFixed(1)}</Text>
+              <StarRating
+                rating={displayRating}
+                size={14}
+                showValue
+                filledColor={STAR_COLOR}
+              />
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Ionicons name="car" size={18} color="#666" />
+              <Ionicons name="car" size={18} color={TEXT_TERTIARY} />
               <Text style={styles.statValue}>{displayRideCount} rides</Text>
             </View>
             {distance ? (
               <>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
-                  <Ionicons name="location" size={18} color="#666" />
+                  <Ionicons name="location" size={18} color={TEXT_TERTIARY} />
                   <Text style={styles.statValue}>{distance} mi</Text>
                 </View>
               </>
@@ -364,8 +330,8 @@ export default function DriverDetailsScreen() {
               <>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
-                  <Ionicons name="checkmark-circle" size={18} color="#007AFF" />
-                  <Text style={[styles.statValue, { color: '#007AFF' }]}>{score}% match</Text>
+                  <Ionicons name="checkmark-circle" size={18} color={ACCENT} />
+                  <Text style={[styles.statValue, { color: ACCENT }]}>{score}% match</Text>
                 </View>
               </>
             ) : null}
@@ -373,7 +339,7 @@ export default function DriverDetailsScreen() {
 
           {matchingRides.length > 0 && (
             <View style={styles.ridesBadge}>
-              <Ionicons name="calendar" size={14} color="#007AFF" />
+              <Ionicons name="calendar" size={14} color={ACCENT} />
               <Text style={styles.ridesBadgeText}>
                 {matchingRides.length} compatible ride{matchingRides.length !== 1 ? 's' : ''}
               </Text>
@@ -383,7 +349,7 @@ export default function DriverDetailsScreen() {
           {bio ? <Text style={styles.bioText}>{bio}</Text> : null}
 
           <TouchableOpacity style={styles.messageButton} onPress={handleMessage}>
-            <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
+            <Ionicons name="chatbubble-ellipses" size={18} color={TEXT_INVERSE} />
             <Text style={styles.messageButtonText}>Message</Text>
           </TouchableOpacity>
         </View>
@@ -400,7 +366,7 @@ export default function DriverDetailsScreen() {
           </Text>
 
           {loadingRequests ? (
-            <ActivityIndicator color="#007AFF" style={{ marginVertical: 16 }} />
+            <ActivityIndicator color={ACCENT} style={{ marginVertical: 16 }} />
           ) : (
             matchingRides.map((ride, i) => {
               const pendingRequestId = pendingRequestByRideId[ride.riderRideId];
@@ -414,7 +380,7 @@ export default function DriverDetailsScreen() {
                     </View>
                     {ride.estimatedDurationMinutes != null && (
                       <View style={styles.durationBadge}>
-                        <Ionicons name="time-outline" size={12} color="#666" />
+                        <Ionicons name="time-outline" size={12} color={TEXT_TERTIARY} />
                         <Text style={styles.durationText}>{ride.estimatedDurationMinutes} min</Text>
                       </View>
                     )}
@@ -426,17 +392,12 @@ export default function DriverDetailsScreen() {
                     {format12h(ride.arrivalTime)}
                   </Text>
 
-                  <View style={styles.routeContainer}>
-                    <View style={styles.routeIconCol}>
-                      <View style={styles.routeDotPickup} />
-                      <View style={styles.routeConnector} />
-                      <View style={styles.routeDotDropoff} />
-                    </View>
-                    <View style={styles.routeTextCol}>
-                      <Text style={styles.routeAddress} numberOfLines={2}>{ride.pickupAddress}</Text>
-                      <Text style={styles.routeAddress} numberOfLines={2}>{ride.dropoffAddress}</Text>
-                    </View>
-                  </View>
+                  <RouteAddressBlock
+                    pickup={ride.pickupAddress}
+                    dropoff={ride.dropoffAddress}
+                    numberOfLines={2}
+                    style={styles.routeBlock}
+                  />
 
                   {pendingRequestId && !isConfirmed ? (
                     <TouchableOpacity
@@ -449,10 +410,10 @@ export default function DriverDetailsScreen() {
                       activeOpacity={0.75}
                     >
                       {isSubmitting ? (
-                        <ActivityIndicator size="small" color="#FF3B30" />
+                        <ActivityIndicator size="small" color={RED} />
                       ) : (
                         <>
-                          <Ionicons name="close-circle-outline" size={16} color="#FF3B30" />
+                          <Ionicons name="close-circle-outline" size={16} color={RED} />
                           <Text style={styles.requestButtonCancelText}>Cancel request</Text>
                         </>
                       )}
@@ -469,15 +430,15 @@ export default function DriverDetailsScreen() {
                       activeOpacity={0.75}
                     >
                       {isSubmitting ? (
-                        <ActivityIndicator size="small" color="#fff" />
+                        <ActivityIndicator size="small" color={TEXT_INVERSE} />
                       ) : isConfirmed ? (
                         <>
-                          <Ionicons name="checkmark-circle" size={16} color="#fff" />
+                          <Ionicons name="checkmark-circle" size={16} color={TEXT_INVERSE} />
                           <Text style={styles.requestButtonText}>Request Sent</Text>
                         </>
                       ) : (
                         <>
-                          <Ionicons name="paper-plane-outline" size={16} color="#fff" />
+                          <Ionicons name="paper-plane-outline" size={16} color={TEXT_INVERSE} />
                           <Text style={styles.requestButtonText}>Request Match</Text>
                         </>
                       )}
@@ -526,7 +487,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: TEXT_PRIMARY,
   },
   placeholder: {
     width: 40,
@@ -558,7 +519,7 @@ const styles = StyleSheet.create({
   driverName: {
     fontSize: 26,
     fontWeight: 'bold',
-    color: '#333',
+    color: TEXT_PRIMARY,
     marginBottom: 12,
   },
   statsRow: {
@@ -577,7 +538,7 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: TEXT_PRIMARY,
   },
   statDivider: {
     width: 1,
@@ -597,11 +558,11 @@ const styles = StyleSheet.create({
   ridesBadgeText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#007AFF',
+    color: ACCENT,
   },
   bioText: {
     fontSize: 15,
-    color: '#666',
+    color: TEXT_TERTIARY,
     lineHeight: 22,
     textAlign: 'center',
     marginBottom: 4,
@@ -617,7 +578,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   messageButtonText: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -629,12 +590,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: TEXT_PRIMARY,
     marginBottom: 4,
   },
   sectionSubtitle: {
     fontSize: 13,
-    color: '#999',
+    color: TEXT_MUTED,
     marginBottom: 16,
     lineHeight: 18,
   },
@@ -659,7 +620,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   dayBadgeText: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontSize: 12,
     fontWeight: '700',
   },
@@ -674,52 +635,17 @@ const styles = StyleSheet.create({
   },
   durationText: {
     fontSize: 12,
-    color: '#666',
+    color: TEXT_TERTIARY,
     fontWeight: '500',
   },
   rideTime: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1c1c1e',
+    color: TEXT_PRIMARY,
     marginBottom: 12,
   },
-  routeContainer: {
-    flexDirection: 'row',
-    gap: 10,
+  routeBlock: {
     marginBottom: 14,
-  },
-  routeIconCol: {
-    alignItems: 'center',
-    paddingTop: 4,
-    width: 12,
-  },
-  routeDotPickup: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#007AFF',
-  },
-  routeConnector: {
-    flex: 1,
-    width: 2,
-    backgroundColor: '#cce0ff',
-    marginVertical: 4,
-    minHeight: 20,
-  },
-  routeDotDropoff: {
-    width: 10,
-    height: 10,
-    borderRadius: 2,
-    backgroundColor: '#34C759',
-  },
-  routeTextCol: {
-    flex: 1,
-    gap: 18,
-  },
-  routeAddress: {
-    fontSize: 13,
-    color: '#444',
-    lineHeight: 18,
   },
   requestButton: {
     flexDirection: 'row',
@@ -737,7 +663,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   requestButtonText: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -753,7 +679,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   requestButtonCancelText: {
-    color: '#FF3B30',
+    color: RED,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -764,7 +690,7 @@ const styles = StyleSheet.create({
   },
   emptyRidesText: {
     fontSize: 15,
-    color: '#bbb',
+    color: PLACEHOLDER,
     fontWeight: '500',
   },
 });

@@ -1,13 +1,36 @@
+import {
+  ACCENT,
+  ACCENT_LIGHT,
+  BG,
+  BORDER,
+  BORDER_DEFAULT,
+  BORDER_LIGHT,
+  CARD_BG,
+  GREEN,
+  ORANGE,
+  PLACEHOLDER,
+  RED,
+  SHADOW,
+  STAR_COLOR,
+  TEXT_INVERSE,
+  TEXT_MUTED,
+  TEXT_PRIMARY,
+  TEXT_SECONDARY,
+  TEXT_TERTIARY,
+} from '@/utils/constants';
+import Avatar from '@/components/Avatar';
+import EmptyState from '@/components/EmptyState';
+import LoadingScreen from '@/components/LoadingScreen';
+import ScreenHeader from '@/components/ScreenHeader';
 import { useAuth } from '@/context/AuthContext';
 import { subscribeToConversations, type ConversationWithId } from '@/services/messagingService';
 import { getUser } from '@/services/userService';
 import type { User } from '@/types/user';
-import { Ionicons } from '@expo/vector-icons';
+import { formatTime } from '@/utils/formatTime';
 import { useRouter } from 'expo-router';
 import { Timestamp } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   StyleSheet,
   Text,
@@ -22,20 +45,6 @@ interface ConversationRow {
   lastMessage: string;
   lastMessageAt: Timestamp | null;
   unread: number;
-}
-
-function formatTime(ts: Timestamp | null): string {
-  if (!ts) return '';
-  const date = ts.toDate();
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return 'now';
-  if (diffMin < 60) return `${diffMin}m`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h`;
-  const diffDays = Math.floor(diffHr / 24);
-  return `${diffDays}d`;
 }
 
 export default function ChatScreen() {
@@ -94,9 +103,7 @@ export default function ChatScreen() {
         })
       }
     >
-      <View style={styles.avatar}>
-        <Ionicons name="person" size={28} color="#999" />
-      </View>
+      <Avatar uri={item.otherUser.profilePhoto} size={56} style={{ marginRight: 12 }} />
       <View style={styles.chatInfo}>
         <View style={styles.chatHeader}>
           <Text style={styles.chatName}>{item.otherUser.name}</Text>
@@ -117,27 +124,19 @@ export default function ChatScreen() {
   );
 
   if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#007AFF" />
-      </View>
-    );
+    return <LoadingScreen />;
   }
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Messages</Text>
-      </View>
+      <ScreenHeader title="Messages" />
 
       {rows.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
-          <Text style={styles.emptyText}>No messages yet</Text>
-          <Text style={styles.emptySubtext}>
-            Start a conversation with your matches
-          </Text>
-        </View>
+        <EmptyState
+          icon="chatbubbles-outline"
+          title="No messages yet"
+          subtitle="Start a conversation with your matches"
+        />
       ) : (
         <FlatList
           data={rows}
@@ -152,43 +151,14 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    paddingTop: 60,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#333',
+    backgroundColor: BG,
   },
   chatCard: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
+    backgroundColor: CARD_BG,
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
-  },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#f0f0f0',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
   },
   chatInfo: {
     flex: 1,
@@ -202,11 +172,11 @@ const styles = StyleSheet.create({
   chatName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: TEXT_PRIMARY,
   },
   chatTime: {
     fontSize: 12,
-    color: '#999',
+    color: TEXT_MUTED,
   },
   messageRow: {
     flexDirection: 'row',
@@ -215,10 +185,10 @@ const styles = StyleSheet.create({
   lastMessage: {
     flex: 1,
     fontSize: 14,
-    color: '#666',
+    color: TEXT_TERTIARY,
   },
   unreadBadge: {
-    backgroundColor: '#007AFF',
+    backgroundColor: ACCENT,
     borderRadius: 10,
     minWidth: 20,
     height: 20,
@@ -228,26 +198,8 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   unreadText: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontSize: 12,
     fontWeight: 'bold',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  emptyText: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#999',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#aaa',
-    textAlign: 'center',
   },
 });

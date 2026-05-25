@@ -19,6 +19,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from '../../config/firebase';
 import { uriToBlob } from '../../utils/uriToBlob';
+import { ACCENT, PLACEHOLDER, RED, TEXT_INVERSE, TEXT_MUTED, TEXT_PRIMARY } from '@/utils/constants';
 
 export default function CarDetailsScreen() {
   const router = useRouter();
@@ -109,7 +110,7 @@ export default function CarDetailsScreen() {
 
         {/* Car Illustration */}
         <View style={styles.iconContainer}>
-          <Ionicons name="car-sport-outline" size={80} color="#007AFF" />
+          <Ionicons name="car-sport-outline" size={80} color={ACCENT} />
         </View>
 
         {/* Form */}
@@ -124,7 +125,7 @@ export default function CarDetailsScreen() {
               value={licensePlate}
               onChangeText={setLicensePlate}
               autoCapitalize="characters"
-              placeholderTextColor="#bbb"
+              placeholderTextColor={PLACEHOLDER}
             />
           </View>
 
@@ -137,7 +138,7 @@ export default function CarDetailsScreen() {
               placeholder="e.g. Toyota Camry 2022"
               value={model}
               onChangeText={setModel}
-              placeholderTextColor="#bbb"
+              placeholderTextColor={PLACEHOLDER}
             />
           </View>
 
@@ -148,7 +149,7 @@ export default function CarDetailsScreen() {
                 <Image source={{ uri: carPhotoUri }} style={styles.carPhotoPreview} />
               ) : (
                 <View style={styles.carPhotoPlaceholder}>
-                  <Ionicons name="camera-outline" size={36} color="#999" />
+                  <Ionicons name="camera-outline" size={36} color={TEXT_MUTED} />
                   <Text style={styles.carPhotoPlaceholderText}>Tap to add a car photo</Text>
                   <Text style={styles.carPhotoPlaceholderSubtext}>Optional</Text>
                 </View>
@@ -156,7 +157,7 @@ export default function CarDetailsScreen() {
             </TouchableOpacity>
             {carPhotoUri && (
               <TouchableOpacity onPress={pickCarPhoto} style={styles.changePhotoRow}>
-                <Ionicons name="refresh-outline" size={15} color="#007AFF" />
+                <Ionicons name="refresh-outline" size={15} color={ACCENT} />
                 <Text style={styles.changePhotoText}>Change photo</Text>
               </TouchableOpacity>
             )}
@@ -171,7 +172,7 @@ export default function CarDetailsScreen() {
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={TEXT_INVERSE} />
             ) : (
               <Text style={styles.saveButtonText}>Save & Continue</Text>
             )}
@@ -189,7 +190,6 @@ export default function CarDetailsScreen() {
     </KeyboardAvoidingView>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
   stepLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#007AFF',
+    color: ACCENT,
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 8,
@@ -239,11 +239,11 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: TEXT_PRIMARY,
     marginBottom: 8,
   },
   required: {
-    color: '#FF3B30',
+    color: RED,
   },
   input: {
     backgroundColor: '#f7f7f7',
@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   },
   carPhotoPlaceholderSubtext: {
     fontSize: 12,
-    color: '#bbb',
+    color: PLACEHOLDER,
   },
   changePhotoRow: {
     flexDirection: 'row',
@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   changePhotoText: {
-    color: '#007AFF',
+    color: ACCENT,
     fontSize: 13,
     fontWeight: '500',
   },
@@ -315,7 +315,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   saveButtonText: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontSize: 17,
     fontWeight: '700',
   },
@@ -337,3 +337,4 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
+

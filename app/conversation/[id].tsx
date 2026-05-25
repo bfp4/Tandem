@@ -1,3 +1,4 @@
+import Avatar from '@/components/Avatar';
 import { useAuth } from '@/context/AuthContext';
 import {
   deleteConversationIfEmpty,
@@ -8,9 +9,11 @@ import {
 } from '@/services/messagingService';
 import { getUser } from '@/services/userService';
 import type { User } from '@/types/user';
+import { formatMessageTime } from '@/utils/formatTime';
+import { normalizeProfilePhotoUrl } from '@/utils/profilePhoto';
+import { ACCENT, TEXT_INVERSE, TEXT_PRIMARY } from '@/utils/constants';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Timestamp } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   FlatList,
@@ -22,11 +25,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-
-function formatMessageTime(ts: Timestamp): string {
-  const date = ts.toDate();
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
 
 export default function ConversationScreen() {
   const { id: conversationId, otherUserId, pending } = useLocalSearchParams<{
@@ -131,12 +129,13 @@ export default function ConversationScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={28} color="#007AFF" />
+          <Ionicons name="chevron-back" size={28} color={ACCENT} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <View style={styles.headerAvatar}>
-            <Ionicons name="person" size={22} color="#999" />
-          </View>
+          <Avatar
+            uri={normalizeProfilePhotoUrl(otherUser?.profilePhoto)}
+            size={38}
+          />
           <Text style={styles.headerName}>{otherUser?.name ?? '...'}</Text>
         </View>
         <View style={styles.backButton} />
@@ -186,7 +185,6 @@ export default function ConversationScreen() {
     </KeyboardAvoidingView>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -212,18 +210,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  headerAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#f0f0f0',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   headerName: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#333',
+    color: TEXT_PRIMARY,
   },
   messageList: {
     paddingHorizontal: 16,
@@ -264,10 +254,10 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   bubbleTextMe: {
-    color: '#fff',
+    color: TEXT_INVERSE,
   },
   bubbleTextThem: {
-    color: '#333',
+    color: TEXT_PRIMARY,
   },
   timeText: {
     fontSize: 11,
@@ -310,7 +300,7 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 10,
     fontSize: 15,
-    color: '#333',
+    color: TEXT_PRIMARY,
   },
   sendButton: {
     width: 40,
@@ -322,3 +312,4 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
 });
+
