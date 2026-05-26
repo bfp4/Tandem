@@ -20,7 +20,7 @@ import { aggregateRatingForUser } from "@/services/ratingService";
 import { getUser } from "@/services/userService";
 import type { RiderRide } from "@/types/riderRide";
 import type { User as AppUser } from "@/types/user";
-import { formatRideDate, parseLocalRideStart } from "@/utils/rideDate";
+import { parseLocalRideStart } from "@/utils/rideDate";
 import { isValidTimeHHMM } from "@/utils/validation";
 import { reverseGeocode } from "@/utils/geocoding";
 import { normalizeProfilePhotoUrl } from "@/utils/profilePhoto";

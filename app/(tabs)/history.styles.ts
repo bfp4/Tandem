@@ -3,20 +3,13 @@ import {
   ACCENT_LIGHT,
   BG,
   BORDER,
-  BORDER_DEFAULT,
-  BORDER_LIGHT,
   CARD_BG,
   GREEN,
   ORANGE,
-  PLACEHOLDER,
   RED,
   SHADOW,
-  STAR_COLOR,
   TEXT_INVERSE,
-  TEXT_MUTED,
   TEXT_PRIMARY,
-  TEXT_SECONDARY,
-  TEXT_TERTIARY,
 } from '@/utils/constants';
 import { StyleSheet } from 'react-native';
 
