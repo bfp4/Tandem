@@ -13,6 +13,14 @@ import type { HistoryBlock } from '@/types/historyBlock';
 import type { AppearancePreference, GenderPreference } from '@/types/user';
 import { uriToBlob } from '@/utils/uriToBlob';
 import { Ionicons } from '@expo/vector-icons';
+import ScreenHeader from '@/components/ScreenHeader';
+import Avatar from '@/components/Avatar';
+import BackRow from '@/components/BackRow';
+import FormField from '@/components/FormField';
+import MenuListItem from '@/components/MenuListItem';
+import ReadOnlyField from '@/components/ReadOnlyField';
+import SaveButton from '@/components/SaveButton';
+import StarRating from '@/components/StarRating';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
@@ -24,13 +32,13 @@ import {
   ActivityIndicator,
   Modal,
   ScrollView,
-  StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { styles } from './account.styles';
 import { auth, db, storage } from '../../config/firebase';
+import { ACCENT, TEXT_INVERSE, TEXT_PRIMARY, TEXT_TERTIARY } from '@/utils/constants';
 
 export default function AccountScreen() {
   const router = useRouter();
@@ -72,7 +80,6 @@ export default function AccountScreen() {
     0,
     Math.min(5, Number.parseFloat(starRating) || 0),
   );
-  const starFilledCount = Math.min(5, Math.max(0, Math.round(starRatingNumeric)));
 
   // Preferences (Account Center)
   const [prefNotificationsEnabled, setPrefNotificationsEnabled] = useState(true);
@@ -259,10 +266,6 @@ export default function AccountScreen() {
     }
   };
 
-  
-
-  
-
   const handleSignOut = async () => {
     try {
       await signOut(auth);
@@ -271,21 +274,6 @@ export default function AccountScreen() {
       setProfileMessage(error?.message ? String(error.message) : 'Failed to sign out.');
       setTimeout(() => setProfileMessage(''), 3000);
     }
-  };
-
-  const handleNotificationsPress = () => {
-    setTemporaryMessage('Notification settings coming soon.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
-  };
-
-  const handleAppearancePress = () => {
-    setTemporaryMessage('Theme settings coming soon.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
-  };
-
-  const handlePlaceSettingsPress = () => {
-    setTemporaryMessage('Place settings coming soon.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
   };
 
   const handlePrivacyPress = () => {
@@ -375,15 +363,6 @@ export default function AccountScreen() {
       setSecuritySaving(false);
     }
   };
-  const handlePaymentMethodsPress = () => {
-    setTemporaryMessage('Payment methods are not connected yet.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
-  };
-
-  const handlePayoutMethodPress = () => {
-    setTemporaryMessage('Payout method is not connected yet.');
-    setTimeout(() => setTemporaryMessage(''), 2500);
-  };
   const handlePickProfilePhoto = async () => {
     try {
       setPhotoMessage('');
@@ -419,7 +398,7 @@ export default function AccountScreen() {
       const downloadURL = await getDownloadURL(photoRef);
 
       setProfilePhoto(downloadURL);
-      setPhotoMessage('Profile photo uploaded. Tap “Save Profile” to save it to your account.');
+      setPhotoMessage('Profile photo uploaded. Tap "Save Profile" to save it to your account.');
       setTimeout(() => setPhotoMessage(''), 4000);
     } catch (error: any) {
       const raw = error?.message ? String(error.message) : '';
@@ -474,7 +453,7 @@ export default function AccountScreen() {
 
       setCarPhoto(downloadURL);
       setCarPhotoPreview(downloadURL);
-      setCarPhotoMessage('Car photo uploaded. Tap “Save Profile” to keep it on your account.');
+      setCarPhotoMessage('Car photo uploaded. Tap "Save Profile" to keep it on your account.');
       setTimeout(() => setCarPhotoMessage(''), 3000);
     } catch (error: any) {
       const raw = error?.message ? String(error.message) : '';
@@ -612,29 +591,21 @@ export default function AccountScreen() {
 
   return (
     <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Profile</Text>
-      </View>
+      <ScreenHeader title="Profile" />
 
       <View style={styles.content}>
         <View style={styles.profileHeaderRow}>
           <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
-              {profilePhoto ? (
-                <Image source={{ uri: profilePhoto }} style={styles.avatarImage} contentFit="cover" />
-              ) : (
-                <Ionicons name="person" size={48} color="#999" />
-              )}
-            </View>
+            <Avatar uri={profilePhoto} size={100} />
             <TouchableOpacity
               style={styles.editAvatarButton}
               onPress={handlePickProfilePhoto}
               disabled={profilePhotoUploading}
             >
               {profilePhotoUploading ? (
-                <ActivityIndicator size="small" color="#007AFF" />
+                <ActivityIndicator size="small" color={ACCENT} />
               ) : (
-                <Ionicons name="camera" size={20} color="#007AFF" />
+                <Ionicons name="camera" size={20} color={ACCENT} />
               )}
             </TouchableOpacity>
           </View>
@@ -645,17 +616,7 @@ export default function AccountScreen() {
               {username?.trim() ? `@${username.trim()}` : 'No username set'}
             </Text>
             <View style={styles.profileHeaderMetaRow}>
-              <View style={styles.profileHeaderStars}>
-                {Array.from({ length: 5 }).map((_, idx) => (
-                  <Ionicons
-                    key={idx}
-                    name={idx < starFilledCount ? 'star' : 'star-outline'}
-                    size={14}
-                    color={starRatingNumeric > 0 ? '#F5B301' : '#C7C7CC'}
-                    style={idx === 4 ? undefined : { marginRight: 2 }}
-                  />
-                ))}
-              </View>
+              <StarRating rating={starRatingNumeric} size={14} />
               {starRatingNumeric > 0 ? (
                 <Text style={styles.profileRatingNumber}>{starRatingNumeric.toFixed(1)}</Text>
               ) : (
@@ -679,73 +640,15 @@ export default function AccountScreen() {
         <View style={styles.profileCard}>
           <Text style={styles.cardTitle}>Profile details</Text>
 
-          {/*
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your name"
-              value={name}
-              onChangeText={setName}
-              placeholderTextColor="#999"
-            />
-          </View>
-          */}
-
-          {/*
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Username</Text>
-            <View style={styles.infoBox}>
-              <Text style={styles.infoText}>{username || 'Not added yet'}</Text>
-            </View>
-            <Text style={styles.helperText}>
-              To change your username, go to Account Center → Personal Details.
-            </Text>
-          </View>
-          */}
-
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Bio</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Tell us about yourself"
-              value={bio}
-              onChangeText={setBio}
-              multiline
-              numberOfLines={4}
-              placeholderTextColor="#999"
-            />
-          </View>
-
-          {/*
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Role</Text>
-            <View style={styles.infoBox}>
-              <Text style={styles.infoText}>{activeRole || 'Not added yet'}</Text>
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Star rating</Text>
-            <View style={styles.infoBox}>
-              {starRating ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  {Array.from({ length: 5 }).map((_, idx) => (
-                    <Ionicons
-                      key={idx}
-                      name={idx < starFilledCount ? 'star' : 'star-outline'}
-                      size={18}
-                      color="#F5B301"
-                      style={idx === 4 ? undefined : { marginRight: 2 }}
-                    />
-                  ))}
-                </View>
-              ) : (
-                <Text style={styles.infoText}>Not added yet</Text>
-              )}
-            </View>
-          </View>
-          */}
+          <FormField
+            label="Bio"
+            value={bio}
+            onChangeText={setBio}
+            placeholder="Tell us about yourself"
+            multiline
+            numberOfLines={4}
+            inputStyle={styles.textArea}
+          />
         </View>
 
         {activeRole === 'driver' && (
@@ -780,7 +683,7 @@ export default function AccountScreen() {
                 >
                   <View style={styles.carDetailsPhotoLeft}>
                     <View style={styles.carDetailsPhotoIcon}>
-                      <Ionicons name="car-outline" size={18} color="#666" />
+                      <Ionicons name="car-outline" size={18} color={TEXT_TERTIARY} />
                     </View>
                     <Text style={styles.infoText}>
                       {carPhoto ? 'Car photo selected' : 'No car photo selected yet'}
@@ -806,19 +709,15 @@ export default function AccountScreen() {
 
 
         <TouchableOpacity style={styles.accountCenterButton} onPress={handleOpenAccountCenter}>
-          <Ionicons name="person-circle-outline" size={20} color="#fff" />
+          <Ionicons name="person-circle-outline" size={20} color={TEXT_INVERSE} />
           <Text style={styles.accountCenterButtonText}>Open Account Center</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.saveButton} 
+        <SaveButton
           onPress={handleSaveProfile}
+          saving={loading}
+          label="Save Profile"
           disabled={loading || carPhotoUploading || profilePhotoUploading}
-        >
-          <Ionicons name="save" size={20} color="#fff" />
-          <Text style={styles.saveButtonText}>
-          {loading ? 'Saving...' : 'Save Profile'}
-          </Text>
-        </TouchableOpacity>
+        />
         {profileMessage ? (
           <Text style={styles.profileMessage}>{profileMessage}</Text>
         ) : null}
@@ -834,7 +733,7 @@ export default function AccountScreen() {
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Account Center</Text>
             <TouchableOpacity onPress={handleCloseAccountCenter} style={styles.closeButton}>
-              <Ionicons name="close" size={28} color="#333" />
+              <Ionicons name="close" size={28} color={TEXT_PRIMARY} />
             </TouchableOpacity>
           </View>
 
@@ -844,38 +743,23 @@ export default function AccountScreen() {
             ) : null}
             {accountCenterView === 'menu' && (
               <>
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handleOpenPersonalDetails}>
-                  <Text style={styles.modalMenuText}>Personal Details</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
+                <MenuListItem label="Personal Details" onPress={handleOpenPersonalDetails} />
+                <MenuListItem label="Security" onPress={handleOpenSecurity} />
+                <MenuListItem label="Payment / Financial" onPress={handleOpenPayment} />
+                <MenuListItem label="Purchase History / Ride History" onPress={handlePurchaseHistoryPress} />
+                <MenuListItem label="Preferences" onPress={handleOpenPreferences} />
 
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handleOpenSecurity}>
-                  <Text style={styles.modalMenuText}>Security</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handleOpenPayment}>
-                  <Text style={styles.modalMenuText}>Payment / Financial</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handlePurchaseHistoryPress}>
-                  <Text style={styles.modalMenuText}>Purchase History / Ride History</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handleOpenPreferences}>
-                  <Text style={styles.modalMenuText}>Preferences</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
                 <Text style={styles.settingsGroupTitle}>Account & Safety</Text>
 
                 <View style={styles.settingsSection}>
                   <TouchableOpacity style={styles.settingItem} onPress={handlePrivacyPress}>
-                    <Ionicons name="shield-outline" size={24} color="#333" />
+                    <Ionicons name="shield-outline" size={24} color={TEXT_PRIMARY} />
                     <Text style={styles.settingText}>Privacy</Text>
                     <Ionicons name="chevron-forward" size={20} color="#ccc" />
                   </TouchableOpacity>
 
                   <TouchableOpacity style={styles.settingItem} onPress={handleAccountHelpPress}>
-                    <Ionicons name="help-circle-outline" size={24} color="#333" />
+                    <Ionicons name="help-circle-outline" size={24} color={TEXT_PRIMARY} />
                     <Text style={styles.settingText}>Account Help</Text>
                     <Ionicons name="chevron-forward" size={20} color="#ccc" />
                   </TouchableOpacity>
@@ -895,268 +779,165 @@ export default function AccountScreen() {
 
             {accountCenterView === 'personal' && (
               <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToAccountCenterMenu}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Account Center</Text>
-                </TouchableOpacity>
+                <BackRow label="Back to Account Center" onPress={handleBackToAccountCenterMenu} />
 
                 <Text style={styles.subSectionTitle}>Personal Details</Text>
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Email</Text>
-                  <View style={styles.infoBox}>
-                    <Text style={styles.infoText}>{user?.email || 'Not available'}</Text>
-                  </View>
-                </View>
+                <ReadOnlyField label="Email" value={user?.email || ''} fallback="Not available" />
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Username</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your username"
-                    value={username}
-                    onChangeText={setUsername}
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                  />
-                </View>
+                <FormField
+                  label="Username"
+                  value={username}
+                  onChangeText={setUsername}
+                  placeholder="Enter your username"
+                  autoCapitalize="none"
+                />
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Phone</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your phone"
-                    value={phone}
-                    onChangeText={setPhone}
-                    placeholderTextColor="#999"
-                    keyboardType="phone-pad"
-                  />
-                </View>
+                <FormField
+                  label="Phone"
+                  value={phone}
+                  onChangeText={setPhone}
+                  placeholder="Enter your phone"
+                  keyboardType="phone-pad"
+                />
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Address</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your address"
-                    value={address}
-                    onChangeText={setAddress}
-                    placeholderTextColor="#999"
-                  />
-                </View>
+                <FormField
+                  label="Address"
+                  value={address}
+                  onChangeText={setAddress}
+                  placeholder="Enter your address"
+                />
 
-                <TouchableOpacity
-                  style={[
-                    styles.saveButton,
-                    savingPersonalDetails ? styles.saveButtonDisabled : null,
-                  ]}
+                <SaveButton
                   onPress={handleSavePersonalDetails}
-                  disabled={savingPersonalDetails}
-                >
-                  <Ionicons name="save" size={20} color="#fff" />
-                  <Text style={styles.saveButtonText}>
-                    {savingPersonalDetails ? 'Saving...' : 'Save Personal Details'}
-                  </Text>
-                </TouchableOpacity>
+                  saving={savingPersonalDetails}
+                  label="Save Personal Details"
+                />
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>User ID</Text>
-                  <View style={styles.infoBox}>
-                    <Text style={styles.infoText}>{user?.uid || 'Not available'}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Date Created</Text>
-                  <View style={styles.infoBox}>
-                    <Text style={styles.infoText}>{createdAtText || 'Not available'}</Text>
-                  </View>
-                </View>
+                <ReadOnlyField label="User ID" value={user?.uid || ''} fallback="Not available" />
+                <ReadOnlyField label="Date Created" value={createdAtText} fallback="Not available" />
               </>
             )}
             {accountCenterView === 'security' && (
               <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToAccountCenterMenu}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Account Center</Text>
-                </TouchableOpacity>
+                <BackRow label="Back to Account Center" onPress={handleBackToAccountCenterMenu} />
 
                 <Text style={styles.subSectionTitle}>Security</Text>
                 {accountCenterMessage ? (
                   <Text style={styles.accountCenterMessage}>{accountCenterMessage}</Text>
                 ) : null}
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Password</Text>
-                  <View style={styles.infoBox}>
-                    <Text style={styles.infoText}>••••••••</Text>
-                  </View>
-                </View>
 
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handleChangePasswordPress}>
-                  <Text style={styles.modalMenuText}>Change Password</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
+                <ReadOnlyField label="Password" value="••••••••" />
+
+                <MenuListItem label="Change Password" onPress={handleChangePasswordPress} />
+                <MenuListItem label="Change Email" onPress={handleChangeEmailPress} />
               </>
             )}
 
             {accountCenterView === 'security_change_password' && (
               <>
-                <TouchableOpacity style={styles.backRow} onPress={() => setAccountCenterView('security')}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Security</Text>
-                </TouchableOpacity>
+                <BackRow label="Back to Security" onPress={() => setAccountCenterView('security')} />
 
                 <Text style={styles.subSectionTitle}>Change Password</Text>
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Current password</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter current password"
-                    value={securityCurrentPassword}
-                    onChangeText={setSecurityCurrentPassword}
-                    placeholderTextColor="#999"
-                    secureTextEntry
-                    autoCapitalize="none"
-                  />
-                </View>
+                <FormField
+                  label="Current password"
+                  value={securityCurrentPassword}
+                  onChangeText={setSecurityCurrentPassword}
+                  placeholder="Enter current password"
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>New password</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter new password"
-                    value={securityNewPassword}
-                    onChangeText={setSecurityNewPassword}
-                    placeholderTextColor="#999"
-                    secureTextEntry
-                    autoCapitalize="none"
-                  />
-                </View>
+                <FormField
+                  label="New password"
+                  value={securityNewPassword}
+                  onChangeText={setSecurityNewPassword}
+                  placeholder="Enter new password"
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
 
-                <TouchableOpacity
-                  style={[styles.saveButton, securitySaving ? styles.saveButtonDisabled : null]}
+                <SaveButton
                   onPress={handleSaveNewPassword}
-                  disabled={securitySaving}
-                >
-                  <Ionicons name="save" size={20} color="#fff" />
-                  <Text style={styles.saveButtonText}>
-                    {securitySaving ? 'Saving...' : 'Save Password'}
-                  </Text>
-                </TouchableOpacity>
+                  saving={securitySaving}
+                  label="Save Password"
+                />
               </>
             )}
 
             {accountCenterView === 'security_change_email' && (
               <>
-                <TouchableOpacity style={styles.backRow} onPress={() => setAccountCenterView('security')}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Security</Text>
-                </TouchableOpacity>
+                <BackRow label="Back to Security" onPress={() => setAccountCenterView('security')} />
 
                 <Text style={styles.subSectionTitle}>Change Email</Text>
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Current password</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter current password"
-                    value={securityCurrentPassword}
-                    onChangeText={setSecurityCurrentPassword}
-                    placeholderTextColor="#999"
-                    secureTextEntry
-                    autoCapitalize="none"
-                  />
-                </View>
+                <FormField
+                  label="Current password"
+                  value={securityCurrentPassword}
+                  onChangeText={setSecurityCurrentPassword}
+                  placeholder="Enter current password"
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>New email</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter new email"
-                    value={securityNewEmail}
-                    onChangeText={setSecurityNewEmail}
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                  />
-                </View>
+                <FormField
+                  label="New email"
+                  value={securityNewEmail}
+                  onChangeText={setSecurityNewEmail}
+                  placeholder="Enter new email"
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
 
-                <TouchableOpacity
-                  style={[styles.saveButton, securitySaving ? styles.saveButtonDisabled : null]}
+                <SaveButton
                   onPress={handleSaveNewEmail}
-                  disabled={securitySaving}
-                >
-                  <Ionicons name="save" size={20} color="#fff" />
-                  <Text style={styles.saveButtonText}>
-                    {securitySaving ? 'Saving...' : 'Save Email'}
-                  </Text>
-                </TouchableOpacity>
+                  saving={securitySaving}
+                  label="Save Email"
+                />
               </>
             )}
 
             {accountCenterView === 'payment' && (
               <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToAccountCenterMenu}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Account Center</Text>
-                </TouchableOpacity>
+                <BackRow label="Back to Account Center" onPress={handleBackToAccountCenterMenu} />
 
                 <Text style={styles.subSectionTitle}>Payment / Financial</Text>
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Bank</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your bank"
-                    value={bank}
-                    onChangeText={setBank}
-                    placeholderTextColor="#999"
-                  />
-                </View>
+                <FormField
+                  label="Bank"
+                  value={bank}
+                  onChangeText={setBank}
+                  placeholder="Enter your bank"
+                />
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Payment Method</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your payment method"
-                    value={paymentMethod}
-                    onChangeText={setPaymentMethod}
-                    placeholderTextColor="#999"
-                  />
-                </View>
+                <FormField
+                  label="Payment Method"
+                  value={paymentMethod}
+                  onChangeText={setPaymentMethod}
+                  placeholder="Enter your payment method"
+                />
 
                 {activeRole === 'driver' && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>Payout Method</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter your payout method"
-                      value={payoutMethod}
-                      onChangeText={setPayoutMethod}
-                      placeholderTextColor="#999"
-                    />
-                  </View>
+                  <FormField
+                    label="Payout Method"
+                    value={payoutMethod}
+                    onChangeText={setPayoutMethod}
+                    placeholder="Enter your payout method"
+                  />
                 )}
 
-                <TouchableOpacity
-                  style={[styles.saveButton, savingPayment ? styles.saveButtonDisabled : null]}
+                <SaveButton
                   onPress={handleSavePaymentFinancial}
-                  disabled={savingPayment}
-                >
-                  <Ionicons name="save" size={20} color="#fff" />
-                  <Text style={styles.saveButtonText}>
-                    {savingPayment ? 'Saving...' : 'Save Payment / Financial'}
-                  </Text>
-                </TouchableOpacity>
+                  saving={savingPayment}
+                  label="Save Payment / Financial"
+                />
               </>
             )}
 
             {accountCenterView === 'activity_history' && (
               <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToAccountCenterMenu}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Account Center</Text>
-                </TouchableOpacity>
+                <BackRow label="Back to Account Center" onPress={handleBackToAccountCenterMenu} />
 
                 <Text style={styles.subSectionTitle}>Ride History</Text>
 
@@ -1227,16 +1008,13 @@ export default function AccountScreen() {
 
             {accountCenterView === 'activity_history_detail' && (
               <>
-                <TouchableOpacity
-                  style={styles.backRow}
+                <BackRow
+                  label="Back to Ride History"
                   onPress={() => {
                     setAccountCenterView('activity_history');
                     setSelectedHistoryBlock(null);
                   }}
-                >
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Ride History</Text>
-                </TouchableOpacity>
+                />
 
                 {!selectedHistoryBlock ? (
                   <Text style={styles.activitySubtle}>No ride selected.</Text>
@@ -1244,117 +1022,33 @@ export default function AccountScreen() {
                   <>
                     <Text style={styles.subSectionTitle}>Ride Purchase Details</Text>
 
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>Date</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>{String(selectedHistoryBlock.date ?? '—')}</Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>Pickup time</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>
-                          {String(selectedHistoryBlock.pickupTime ?? '—')}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>Amount paid</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>
-                          {`$${String(selectedHistoryBlock.amountPaid ?? '—')}`}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>Driver ID</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>
-                          {String(selectedHistoryBlock.otherUserId ?? '—')}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>rideRequestId</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>
-                          {String(selectedHistoryBlock.rideRequestId ?? '—')}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>Pickup coordinates</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>
-                          {`(${String(selectedHistoryBlock.pickupLocation?.latitude ?? '—')}, ${String(
-                            selectedHistoryBlock.pickupLocation?.longitude ?? '—'
-                          )})`}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>Dropoff coordinates</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>
-                          {`(${String(selectedHistoryBlock.dropoffLocation?.latitude ?? '—')}, ${String(
-                            selectedHistoryBlock.dropoffLocation?.longitude ?? '—'
-                          )})`}
-                        </Text>
-                      </View>
-                    </View>
+                    <ReadOnlyField label="Date" value={String(selectedHistoryBlock.date ?? '—')} />
+                    <ReadOnlyField label="Pickup time" value={String(selectedHistoryBlock.pickupTime ?? '—')} />
+                    <ReadOnlyField label="Amount paid" value={`$${String(selectedHistoryBlock.amountPaid ?? '—')}`} />
+                    <ReadOnlyField label="Driver ID" value={String(selectedHistoryBlock.otherUserId ?? '—')} />
+                    <ReadOnlyField label="rideRequestId" value={String(selectedHistoryBlock.rideRequestId ?? '—')} />
+                    <ReadOnlyField
+                      label="Pickup coordinates"
+                      value={`(${String(selectedHistoryBlock.pickupLocation?.latitude ?? '—')}, ${String(
+                        selectedHistoryBlock.pickupLocation?.longitude ?? '—'
+                      )})`}
+                    />
+                    <ReadOnlyField
+                      label="Dropoff coordinates"
+                      value={`(${String(selectedHistoryBlock.dropoffLocation?.latitude ?? '—')}, ${String(
+                        selectedHistoryBlock.dropoffLocation?.longitude ?? '—'
+                      )})`}
+                    />
                   </>
                 ) : (
                   <>
                     <Text style={styles.subSectionTitle}>Driver Ride Details</Text>
 
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>Date</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>{String(selectedHistoryBlock.date ?? '—')}</Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>Pickup time</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>
-                          {String(selectedHistoryBlock.pickupTime ?? '—')}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>Amount earned</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>
-                          {`$${String(selectedHistoryBlock.amountPaid ?? '—')}`}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>Rider ID</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>
-                          {String(selectedHistoryBlock.otherUserId ?? '—')}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.section}>
-                      <Text style={styles.sectionLabel}>rideRequestId</Text>
-                      <View style={styles.infoBox}>
-                        <Text style={styles.infoText}>
-                          {String(selectedHistoryBlock.rideRequestId ?? '—')}
-                        </Text>
-                      </View>
-                    </View>
+                    <ReadOnlyField label="Date" value={String(selectedHistoryBlock.date ?? '—')} />
+                    <ReadOnlyField label="Pickup time" value={String(selectedHistoryBlock.pickupTime ?? '—')} />
+                    <ReadOnlyField label="Amount earned" value={`$${String(selectedHistoryBlock.amountPaid ?? '—')}`} />
+                    <ReadOnlyField label="Rider ID" value={String(selectedHistoryBlock.otherUserId ?? '—')} />
+                    <ReadOnlyField label="rideRequestId" value={String(selectedHistoryBlock.rideRequestId ?? '—')} />
                   </>
                 )}
               </>
@@ -1362,27 +1056,20 @@ export default function AccountScreen() {
 
             {accountCenterView === 'preferences' && (
               <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToAccountCenterMenu}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Account Center</Text>
-                </TouchableOpacity>
+                <BackRow label="Back to Account Center" onPress={handleBackToAccountCenterMenu} />
 
                 <Text style={styles.subSectionTitle}>Preferences</Text>
 
-                <TouchableOpacity style={styles.modalMenuItem} onPress={handleNotificationsSettingsPress}>
-                  <Text style={styles.modalMenuText}>Notifications</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </TouchableOpacity>
-
+                <MenuListItem label="Notifications" onPress={handleNotificationsSettingsPress} />
+                <MenuListItem label="Appearance" onPress={handleAppearanceSettingsPress} />
+                <MenuListItem label="Place Settings" onPress={handlePlaceSettingsMenuPress} />
+                <MenuListItem label="Gender Preference" onPress={handleGenderPreferencePress} />
               </>
             )}
 
             {accountCenterView === 'preferences_notifications' && (
               <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToPreferencesMenu}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Preferences</Text>
-                </TouchableOpacity>
+                <BackRow label="Back to Preferences" onPress={handleBackToPreferencesMenu} />
 
                 <Text style={styles.subSectionTitle}>Notifications</Text>
 
@@ -1396,25 +1083,17 @@ export default function AccountScreen() {
                   </Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[styles.saveButton, savingPreferences ? styles.saveButtonDisabled : null]}
+                <SaveButton
                   onPress={handleSavePreferences}
-                  disabled={savingPreferences}
-                >
-                  <Ionicons name="save" size={20} color="#fff" />
-                  <Text style={styles.saveButtonText}>
-                    {savingPreferences ? 'Saving...' : 'Save Notifications'}
-                  </Text>
-                </TouchableOpacity>
+                  saving={savingPreferences}
+                  label="Save Notifications"
+                />
               </>
             )}
 
             {accountCenterView === 'preferences_appearance' && (
               <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToPreferencesMenu}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Preferences</Text>
-                </TouchableOpacity>
+                <BackRow label="Back to Preferences" onPress={handleBackToPreferencesMenu} />
 
                 <Text style={styles.subSectionTitle}>Appearance</Text>
 
@@ -1440,58 +1119,38 @@ export default function AccountScreen() {
                   ))}
                 </View>
 
-                <TouchableOpacity
-                  style={[styles.saveButton, savingPreferences ? styles.saveButtonDisabled : null]}
+                <SaveButton
                   onPress={handleSavePreferences}
-                  disabled={savingPreferences}
-                >
-                  <Ionicons name="save" size={20} color="#fff" />
-                  <Text style={styles.saveButtonText}>
-                    {savingPreferences ? 'Saving...' : 'Save Appearance'}
-                  </Text>
-                </TouchableOpacity>
+                  saving={savingPreferences}
+                  label="Save Appearance"
+                />
               </>
             )}
 
             {accountCenterView === 'preferences_place' && (
               <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToPreferencesMenu}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Preferences</Text>
-                </TouchableOpacity>
+                <BackRow label="Back to Preferences" onPress={handleBackToPreferencesMenu} />
 
                 <Text style={styles.subSectionTitle}>Place Settings</Text>
 
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Default place</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="e.g. Home city, neighborhood, campus"
-                    value={prefPlaceSettings}
-                    onChangeText={setPrefPlaceSettings}
-                    placeholderTextColor="#999"
-                  />
-                </View>
+                <FormField
+                  label="Default place"
+                  value={prefPlaceSettings}
+                  onChangeText={setPrefPlaceSettings}
+                  placeholder="e.g. Home city, neighborhood, campus"
+                />
 
-                <TouchableOpacity
-                  style={[styles.saveButton, savingPreferences ? styles.saveButtonDisabled : null]}
+                <SaveButton
                   onPress={handleSavePreferences}
-                  disabled={savingPreferences}
-                >
-                  <Ionicons name="save" size={20} color="#fff" />
-                  <Text style={styles.saveButtonText}>
-                    {savingPreferences ? 'Saving...' : 'Save Place Settings'}
-                  </Text>
-                </TouchableOpacity>
+                  saving={savingPreferences}
+                  label="Save Place Settings"
+                />
               </>
             )}
 
             {accountCenterView === 'preferences_gender' && (
               <>
-                <TouchableOpacity style={styles.backRow} onPress={handleBackToPreferencesMenu}>
-                  <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                  <Text style={styles.backRowText}>Back to Preferences</Text>
-                </TouchableOpacity>
+                <BackRow label="Back to Preferences" onPress={handleBackToPreferencesMenu} />
 
                 <Text style={styles.subSectionTitle}>Gender Preference</Text>
 
@@ -1523,16 +1182,11 @@ export default function AccountScreen() {
                   ))}
                 </View>
 
-                <TouchableOpacity
-                  style={[styles.saveButton, savingPreferences ? styles.saveButtonDisabled : null]}
+                <SaveButton
                   onPress={handleSavePreferences}
-                  disabled={savingPreferences}
-                >
-                  <Ionicons name="save" size={20} color="#fff" />
-                  <Text style={styles.saveButtonText}>
-                    {savingPreferences ? 'Saving...' : 'Save Gender Preference'}
-                  </Text>
-                </TouchableOpacity>
+                  saving={savingPreferences}
+                  label="Save Gender Preference"
+                />
               </>
             )}
           </ScrollView>
@@ -1541,515 +1195,3 @@ export default function AccountScreen() {
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    padding: 16,
-    paddingTop: 60,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 28,
-  },
-  avatarContainer: {
-    position: 'relative',
-    marginRight: 12,
-  },
-  photoMessage: {
-    marginTop: -4,
-    marginBottom: 16,
-    fontSize: 13,
-    color: '#666',
-    textAlign: 'center',
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#f0f0f0',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-  },
-  editAvatarButton: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  profileHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 16,
-  },
-  profileHeaderText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  profileHeaderName: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#333',
-  },
-  profileHeaderUsername: {
-    marginTop: 2,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
-  },
-  profileHeaderMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-    gap: 10,
-  },
-  profileHeaderStars: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  profileRatingNumber: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#444',
-    minWidth: 28,
-  },
-  profileRatingNew: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#9CA3AF',
-  },
-  roleBadge: {
-    backgroundColor: '#EEF2FF',
-    borderRadius: 999,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: '#C7D2FE',
-  },
-  roleBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#4338CA',
-  },
-  section: {
-    marginBottom: 16,
-  },
-  sectionLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 6,
-  },
-  profileCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    padding: 14,
-    marginBottom: 18,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#333',
-    marginBottom: 12,
-  },
-  helperText: {
-    marginTop: 8,
-    fontSize: 12,
-    color: '#666',
-  },
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    color: '#333',
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  infoBox: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  infoText: {
-    fontSize: 16,
-    color: '#333',
-  },
-
-  carDetailsCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    padding: 14,
-    marginBottom: 20,
-  },
-  carDetailsHeader: {
-    paddingBottom: 10,
-    marginBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  carDetailsTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#333',
-  },
-  carDetailsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 12,
-  },
-  carDetailsField: {
-    flex: 1,
-  },
-  carDetailsFieldFull: {
-    width: '100%',
-  },
-  carDetailsInfoBox: {
-    paddingVertical: 12,
-  },
-  carDetailsPhotoBox: {
-    paddingVertical: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  carDetailsPhotoLeft: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  carDetailsPhotoIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: '#f5f5f5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#eee',
-  },
-  carDetailsPhotoHint: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
-  },
-  carDetailsPhotoPreview: {
-    width: 56,
-    height: 56,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e5e5e5',
-    backgroundColor: '#f5f5f5',
-  },
-  carPhotoMessage: {
-    marginTop: 8,
-    fontSize: 13,
-    color: '#666',
-  },
-  profileMessage: {
-    marginTop: -10,
-    marginBottom: 18,
-    fontSize: 13,
-    color: '#666',
-    textAlign: 'center',
-  },
-  
-  saveButton: {
-    flexDirection: 'row',
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
-    gap: 8,
-  },
-  accountCenterButton: {
-    flexDirection: 'row',
-    backgroundColor: '#6366F1',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
-    gap: 8,
-  },
-  accountCenterButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  settingsSection: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 24,
-    overflow: 'hidden',
-  },
-  settingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  settingText: {
-    flex: 1,
-    fontSize: 16,
-    color: '#333',
-    marginLeft: 12,
-  },
-  signOutButton: {
-    backgroundColor: '#ff3b30',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  signOutButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-
-  settingsGroupTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#666',
-    marginBottom: 8,
-    marginTop: 8,
-    marginLeft: 4,
-  },
-  settingDangerText: {
-    flex: 1,
-    fontSize: 16,
-    color: '#ff3b30',
-    marginLeft: 12,
-    fontWeight: '500',
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  modalTitle: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  closeButton: {
-    padding: 4,
-  },
-  modalContent: {
-    flex: 1,
-    padding: 16,
-  },
-  modalMenuItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 18,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  modalMenuText: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '500',
-  },
-  activityMessage: {
-    marginTop: 10,
-    marginBottom: 6,
-    fontSize: 13,
-    color: '#333',
-  },
-  activitySectionTitle: {
-    marginTop: 16,
-    marginBottom: 8,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#333',
-  },
-  activitySubtle: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 8,
-  },
-  activityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginBottom: 8,
-  },
-  activityRowLeft: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  activityName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#333',
-  },
-  activityRole: {
-    marginTop: 2,
-    fontSize: 12,
-    color: '#666',
-  },
-  activityActionButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: '#f5f5f5',
-    borderWidth: 1,
-    borderColor: '#e5e5e5',
-  },
-  activityActionText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#333',
-  },
-    backRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  backRowText: {
-    fontSize: 15,
-    color: '#6366F1',
-    fontWeight: '600',
-    marginLeft: 4,
-  },
-  subSectionTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 16,
-  },
-  temporaryMessage: {
-    backgroundColor: '#EEF2FF',
-    color: '#4338CA',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 16,
-    fontSize: 14,
-  },
- 
-  accountCenterMessage: {
-    fontSize: 14,
-    color: '#6366F1',
-    marginBottom: 16,
-  },
-
-  choiceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 18,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  choiceRowText: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '500',
-  },
-  choiceRowValue: {
-    fontSize: 16,
-    color: '#6366F1',
-    fontWeight: '700',
-  },
-  choiceGroup: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 16,
-  },
-  choicePill: {
-    backgroundColor: '#fff',
-    borderRadius: 999,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  choicePillActive: {
-    borderColor: '#6366F1',
-    backgroundColor: '#EEF2FF',
-  },
-  choicePillText: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '600',
-  },
-  choicePillTextActive: {
-    color: '#4338CA',
-  },
-});

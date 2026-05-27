@@ -17,8 +17,15 @@ import type { RiderRide } from "@/types/riderRide";
 import type { ScheduleBlock } from "@/types/scheduleBlock";
 import type { User } from "@/types/user";
 import { calculateDriveTime, formatDriveTime } from "@/utils/driveTime";
+import { format12h } from "@/utils/format12h";
 import { forwardGeocode } from "@/utils/geocoding";
 import { normalizeProfilePhotoUrl } from "@/utils/profilePhoto";
+import {
+  blockMatchesDay,
+  DAYS,
+  FULL_DAY,
+  rideRequestMatchesDay,
+} from "@/utils/scheduleDays";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
@@ -38,72 +45,18 @@ import {
   Modal,
   Platform,
   ScrollView,
-  StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { styles } from "./history.styles";
 import { db } from "../../config/firebase";
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const FULL_DAY: Record<string, string> = {
-  Mon: "Monday",
-  Tue: "Tuesday",
-  Wed: "Wednesday",
-  Thu: "Thursday",
-  Fri: "Friday",
-  Sat: "Saturday",
-  Sun: "Sunday",
-};
-const DAY_NUM: Record<number, string> = {
-  0: "Sun",
-  1: "Mon",
-  2: "Tue",
-  3: "Wed",
-  4: "Thu",
-  5: "Fri",
-  6: "Sat",
-};
-
-const TIME_OPTIONS: string[] = [];
-for (let h = 0; h < 24; h++) {
-  for (let m = 0; m < 60; m += 15) {
-    TIME_OPTIONS.push(
-      `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
-    );
-  }
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function format12h(hhmm: string): string {
-  const [h, m] = hhmm.split(":").map(Number);
-  const period = h < 12 ? "AM" : "PM";
-  const hours = h % 12 === 0 ? 12 : h % 12;
-  return `${hours}:${String(m).padStart(2, "0")} ${period}`;
-}
-
-function dayMatchesList(day: string, list: string[] | null): boolean {
-  if (!list) return false;
-  return list.some((d) =>
-    d.toLowerCase().startsWith(day.toLowerCase().slice(0, 3)),
-  );
-}
-
-function blockMatchesDay(block: ScheduleBlock, day: string): boolean {
-  if (block.repeating) return dayMatchesList(day, block.repeatDays);
-  if (block.date)
-    return DAY_NUM[new Date(block.date + "T00:00:00").getDay()] === day;
-  return false;
-}
-
-function rideRequestMatchesDay(r: RideRequest, day: string): boolean {
-  if (r.repeating) return dayMatchesList(day, r.repeatDays);
-  return DAY_NUM[new Date(r.date + "T00:00:00").getDay()] === day;
-}
+import LoadingScreen from "@/components/LoadingScreen";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import DriverScheduleForm from "@/components/schedule/DriverScheduleForm";
+import RiderScheduleForm from "@/components/schedule/RiderScheduleForm";
+import ScreenHeader from "@/components/ScreenHeader";
+import { ACCENT, GREEN, ORANGE, RED, TEXT_INVERSE, TEXT_PRIMARY } from '@/utils/constants';
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
@@ -154,7 +107,6 @@ export default function ScheduleScreen() {
   const [pendingCancellation, setPendingCancellation] =
     useState<PendingCancellation | null>(null);
   const pendingCancellationRef = useRef<PendingCancellation | null>(null);
-  const [cancellationStatus, setCancellationStatus] = useState<string>("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [pendingDeletion, setPendingDeletion] = useState<string | null>(null);
 
@@ -566,73 +518,34 @@ export default function ScheduleScreen() {
   };
 
   const runCancellation = async (payload: PendingCancellation | null) => {
-    setCancellationStatus("Button clicked!");
-    if (!payload) {
-      setCancellationStatus("Error: No pending cancellation");
-      return;
-    }
+    if (!payload) return;
 
     const { requestId, otherUserId, riderRideId } = payload;
-    console.log("🔥 Starting cancellation:", {
-      requestId,
-      otherUserId,
-      riderRideId,
-    });
-    setCancellationStatus("Starting cancellation...");
     setShowCancelConfirm(false);
     setActingOnRide(true);
 
     try {
-      console.log("Step 1: Cancelling ride request...");
-      setCancellationStatus("Step 1/4: Cancelling request...");
       await cancelRideRequest(requestId, user?.uid);
-      console.log("✅ Ride request cancelled");
-
-      console.log("Step 2: Creating notification...");
-      setCancellationStatus("Step 2/4: Sending notification...");
       await createNotification(
         otherUserId,
         "ride_cancelled",
         requestId,
         "A ride has been cancelled.",
       );
-      console.log("✅ Notification sent");
 
       if (riderRideId && userProfile?.activeRole === "rider") {
-        console.log("Step 3: Deleting rider ride:", riderRideId);
-        setCancellationStatus("Step 3/4: Deleting ride...");
         await deleteRiderRide(riderRideId);
-        console.log("✅ Rider ride deleted");
-      } else {
-        console.log(
-          "⚠️ Skipping rider ride deletion. riderRideId:",
-          riderRideId,
-          "role:",
-          userProfile?.activeRole,
-        );
-        setCancellationStatus("Step 3/4: Skipped (no riderRideId)");
       }
 
-      console.log("Step 4: Refreshing data and closing modals...");
-      setCancellationStatus("Step 4/4: Refreshing...");
-
       await loadAll(true);
-      console.log("✅ Data refreshed. Closing modals...");
       setSelectedRide(null);
       setSelectedRiderRide(null);
       pendingCancellationRef.current = null;
       setPendingCancellation(null);
-      setCancellationStatus("Complete!");
-      setTimeout(() => setCancellationStatus(""), 2000);
     } catch (e: any) {
-      console.error("Error during cancellation:", e);
-      console.error("Error message:", e.message);
-      console.error("Error stack:", e.stack);
-      setCancellationStatus("Error: " + e.message);
       Alert.alert("Error", e.message ?? "Could not cancel the ride.");
     } finally {
       setActingOnRide(false);
-      console.log("🔥 Cancellation process finished");
     }
   };
 
@@ -663,42 +576,24 @@ export default function ScheduleScreen() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#007AFF" />
-      </View>
-    );
+    return <LoadingScreen />;
   }
 
   const isRider = userProfile?.activeRole === "rider";
 
   return (
     <View style={styles.container}>
-      {/* Debug Status Banner */}
-      {cancellationStatus && (
-        <View
-          style={{
-            backgroundColor: "#FF9500",
-            padding: 10,
-            alignItems: "center",
-          }}
-        >
-          <Text style={{ color: "#fff", fontWeight: "bold" }}>
-            {cancellationStatus}
-          </Text>
-        </View>
-      )}
-
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Schedule</Text>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => setShowAddModal(true)}
-        >
-          <Ionicons name="add" size={22} color="#fff" />
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        title="My Schedule"
+        right={
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() => setShowAddModal(true)}
+          >
+            <Ionicons name="add" size={22} color={TEXT_INVERSE} />
+          </TouchableOpacity>
+        }
+      />
 
       {/* Day accordion */}
       <ScrollView contentContainerStyle={styles.listContent}>
@@ -781,7 +676,7 @@ export default function ScheduleScreen() {
                 {isRider ? "Add Ride" : "Add Availability"}
               </Text>
               <TouchableOpacity onPress={closeAddModal}>
-                <Ionicons name="close" size={26} color="#333" />
+                <Ionicons name="close" size={26} color={TEXT_PRIMARY} />
               </TouchableOpacity>
             </View>
 
@@ -790,7 +685,7 @@ export default function ScheduleScreen() {
               showsVerticalScrollIndicator={false}
             >
               {isRider ? (
-                <RiderForm
+                <RiderScheduleForm
                   pickup={ridePickup}
                   dropoff={rideDropoff}
                   departureTime={rideDepartureTime}
@@ -817,7 +712,7 @@ export default function ScheduleScreen() {
                   }}
                 />
               ) : (
-                <DriverForm
+                <DriverScheduleForm
                   days={availDays}
                   startTime={availStartTime}
                   setStartTime={setAvailStartTime}
@@ -846,10 +741,10 @@ export default function ScheduleScreen() {
                 disabled={submitting}
               >
                 {submitting ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={TEXT_INVERSE} />
                 ) : (
                   <>
-                    <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                    <Ionicons name="checkmark-circle" size={20} color={TEXT_INVERSE} />
                     <Text style={styles.submitButtonText}>
                       {isRider ? "Add Ride" : "Save Availability"}
                     </Text>
@@ -898,7 +793,7 @@ export default function ScheduleScreen() {
                         onPress={() => setSelectedRide(null)}
                         disabled={actingOnRide}
                       >
-                        <Ionicons name="close" size={26} color="#333" />
+                        <Ionicons name="close" size={26} color={TEXT_PRIMARY} />
                       </TouchableOpacity>
                     </View>
 
@@ -962,7 +857,7 @@ export default function ScheduleScreen() {
                           <Ionicons
                             name="person-circle-outline"
                             size={18}
-                            color="#007AFF"
+                            color={ACCENT}
                           />
                           <Text style={styles.viewProfileText}>
                             View Rider's Page
@@ -982,7 +877,7 @@ export default function ScheduleScreen() {
                           disabled={actingOnRide}
                         >
                           {actingOnRide ? (
-                            <ActivityIndicator color="#fff" size="small" />
+                            <ActivityIndicator color={TEXT_INVERSE} size="small" />
                           ) : (
                             <Text style={styles.actionText}>Deny</Text>
                           )}
@@ -998,7 +893,7 @@ export default function ScheduleScreen() {
                           disabled={actingOnRide}
                         >
                           {actingOnRide ? (
-                            <ActivityIndicator color="#fff" size="small" />
+                            <ActivityIndicator color={TEXT_INVERSE} size="small" />
                           ) : (
                             <Text style={styles.actionText}>Accept</Text>
                           )}
@@ -1010,7 +905,7 @@ export default function ScheduleScreen() {
                           <Ionicons
                             name="checkmark-circle"
                             size={18}
-                            color="#34C759"
+                            color={GREEN}
                           />
                           <Text style={styles.confirmedText}>
                             Ride confirmed
@@ -1023,15 +918,6 @@ export default function ScheduleScreen() {
                             actingOnRide && styles.actionDisabled,
                           ]}
                           onPress={() => {
-                            console.log(
-                              "🔵 Cancel Ride button pressed (driver modal)",
-                              {
-                                rideId: ride.id,
-                                riderId: ride.riderId,
-                                riderRideId: ride.riderRideId,
-                                actingOnRide,
-                              },
-                            );
                             handleCancelRideRequest(
                               ride.id,
                               ride.riderId,
@@ -1041,7 +927,7 @@ export default function ScheduleScreen() {
                           disabled={actingOnRide}
                         >
                           {actingOnRide ? (
-                            <ActivityIndicator color="#fff" size="small" />
+                            <ActivityIndicator color={TEXT_INVERSE} size="small" />
                           ) : (
                             <Text style={styles.actionText}>Cancel Ride</Text>
                           )}
@@ -1100,7 +986,7 @@ export default function ScheduleScreen() {
                           onPress={() => setSelectedRiderRide(null)}
                           disabled={actingOnRide}
                         >
-                          <Ionicons name="close" size={26} color="#333" />
+                          <Ionicons name="close" size={26} color={TEXT_PRIMARY} />
                         </TouchableOpacity>
                       </View>
 
@@ -1109,7 +995,7 @@ export default function ScheduleScreen() {
                         <Ionicons
                           name="location-outline"
                           size={20}
-                          color="#34C759"
+                          color={GREEN}
                         />
                         <Text style={styles.detailText} numberOfLines={2}>
                           {ride.pickupAddress}
@@ -1119,7 +1005,7 @@ export default function ScheduleScreen() {
                         <Ionicons
                           name="navigate-outline"
                           size={20}
-                          color="#FF3B30"
+                          color={RED}
                         />
                         <Text style={styles.detailText} numberOfLines={2}>
                           {ride.dropoffAddress}
@@ -1159,12 +1045,12 @@ export default function ScheduleScreen() {
                           <Ionicons
                             name="checkmark-circle"
                             size={20}
-                            color="#34C759"
+                            color={GREEN}
                           />
                           <Text
                             style={[
                               styles.detailText,
-                              { color: "#34C759", fontWeight: "600" },
+                              { color: GREEN, fontWeight: "600" },
                             ]}
                           >
                             Driver confirmed
@@ -1176,12 +1062,12 @@ export default function ScheduleScreen() {
                           <Ionicons
                             name="car-outline"
                             size={20}
-                            color="#007AFF"
+                            color={ACCENT}
                           />
                           <Text
                             style={[
                               styles.detailText,
-                              { color: "#007AFF", fontWeight: "600" },
+                              { color: ACCENT, fontWeight: "600" },
                             ]}
                           >
                             {pendingIncoming.length} driver
@@ -1216,7 +1102,7 @@ export default function ScheduleScreen() {
                           <Ionicons
                             name="person-circle-outline"
                             size={18}
-                            color="#007AFF"
+                            color={ACCENT}
                           />
                           <Text style={styles.viewProfileText}>
                             View Driver's Page
@@ -1264,7 +1150,7 @@ export default function ScheduleScreen() {
                                   >
                                     {actingOnRide ? (
                                       <ActivityIndicator
-                                        color="#fff"
+                                        color={TEXT_INVERSE}
                                         size="small"
                                       />
                                     ) : (
@@ -1285,7 +1171,7 @@ export default function ScheduleScreen() {
                                   >
                                     {actingOnRide ? (
                                       <ActivityIndicator
-                                        color="#fff"
+                                        color={TEXT_INVERSE}
                                         size="small"
                                       />
                                     ) : (
@@ -1319,7 +1205,7 @@ export default function ScheduleScreen() {
                             disabled={actingOnRide}
                           >
                             {actingOnRide ? (
-                              <ActivityIndicator color="#fff" size="small" />
+                              <ActivityIndicator color={TEXT_INVERSE} size="small" />
                             ) : (
                               <Text style={styles.actionText}>Cancel Ride</Text>
                             )}
@@ -1379,7 +1265,7 @@ export default function ScheduleScreen() {
                         onPress={() => setSelectedIncoming(null)}
                         disabled={actingOnRide}
                       >
-                        <Ionicons name="close" size={26} color="#333" />
+                        <Ionicons name="close" size={26} color={TEXT_PRIMARY} />
                       </TouchableOpacity>
                     </View>
 
@@ -1419,7 +1305,7 @@ export default function ScheduleScreen() {
                       <Text
                         style={[
                           styles.detailText,
-                          { color: "#FF9500", fontWeight: "600" },
+                          { color: ORANGE, fontWeight: "600" },
                         ]}
                       >
                         This driver would like to drive you
@@ -1436,7 +1322,7 @@ export default function ScheduleScreen() {
                         disabled={actingOnRide}
                       >
                         {actingOnRide ? (
-                          <ActivityIndicator color="#fff" size="small" />
+                          <ActivityIndicator color={TEXT_INVERSE} size="small" />
                         ) : (
                           <Text style={styles.actionText}>Decline</Text>
                         )}
@@ -1450,7 +1336,7 @@ export default function ScheduleScreen() {
                         disabled={actingOnRide}
                       >
                         {actingOnRide ? (
-                          <ActivityIndicator color="#fff" size="small" />
+                          <ActivityIndicator color={TEXT_INVERSE} size="small" />
                         ) : (
                           <Text style={styles.actionText}>Accept</Text>
                         )}
@@ -1464,86 +1350,37 @@ export default function ScheduleScreen() {
       </Modal>
 
       {/* ── Custom Cancel Confirmation Modal ───────────────────────────────────── */}
-      <Modal
+      <ConfirmDialog
         visible={showCancelConfirm}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
+        title="Cancel Ride"
+        message="This will cancel your confirmed ride. Are you sure?"
+        confirmLabel="Cancel Ride"
+        cancelLabel="Keep Ride"
+        onConfirm={() => {
+          executeCancellation();
+        }}
+        onCancel={() => {
           pendingCancellationRef.current = null;
           setShowCancelConfirm(false);
           setPendingCancellation(null);
         }}
-      >
-        <View style={styles.confirmOverlay}>
-          <View style={styles.confirmBox}>
-            <Text style={styles.confirmTitle}>Cancel Ride</Text>
-            <Text style={styles.confirmMessage}>
-              This will cancel your confirmed ride. Are you sure?
-            </Text>
-            <View style={styles.confirmButtons}>
-              <TouchableOpacity
-                style={[styles.confirmButton, styles.confirmKeep]}
-                onPress={() => {
-                  pendingCancellationRef.current = null;
-                  setShowCancelConfirm(false);
-                  setPendingCancellation(null);
-                }}
-              >
-                <Text style={styles.confirmKeepText}>Keep Ride</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.confirmButton, styles.confirmCancel]}
-                onPress={() => {
-                  console.log("🔴 CANCEL RIDE BUTTON IN DIALOG CLICKED!");
-                  executeCancellation();
-                }}
-              >
-                <Text style={styles.confirmCancelText}>Cancel Ride</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      />
 
       {/* ── Custom Delete Confirmation Modal ───────────────────────────────────── */}
-      <Modal
+      <ConfirmDialog
         visible={showDeleteConfirm}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
+        title="Remove Ride"
+        message="Remove this ride from your schedule? This cannot be undone."
+        confirmLabel="Remove Ride"
+        cancelLabel="Keep Ride"
+        onConfirm={() => {
+          executeDelete();
+        }}
+        onCancel={() => {
           setShowDeleteConfirm(false);
           setPendingDeletion(null);
         }}
-      >
-        <View style={styles.confirmOverlay}>
-          <View style={styles.confirmBox}>
-            <Text style={styles.confirmTitle}>Remove Ride</Text>
-            <Text style={styles.confirmMessage}>
-              Remove this ride from your schedule? This cannot be undone.
-            </Text>
-            <View style={styles.confirmButtons}>
-              <TouchableOpacity
-                style={[styles.confirmButton, styles.confirmKeep]}
-                onPress={() => {
-                  setShowDeleteConfirm(false);
-                  setPendingDeletion(null);
-                }}
-              >
-                <Text style={styles.confirmKeepText}>Keep Ride</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.confirmButton, styles.confirmCancel]}
-                onPress={() => {
-                  console.log("🔴 DELETE RIDE BUTTON IN DIALOG CLICKED!");
-                  executeDelete();
-                }}
-              >
-                <Text style={styles.confirmCancelText}>Remove Ride</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      />
     </View>
   );
 }
@@ -1771,7 +1608,7 @@ function RiderDayContent({
                 <View style={styles.routeViz}>
                   <View style={styles.routeDotGreen} />
                   <View style={styles.routeVizLine} />
-                  <Ionicons name="location" size={14} color="#FF3B30" />
+                  <Ionicons name="location" size={14} color={RED} />
                 </View>
                 <View style={styles.routeInfo}>
                   <Text style={styles.routeAddr} numberOfLines={1}>
@@ -1795,7 +1632,7 @@ function RiderDayContent({
                     <Ionicons
                       name="checkmark-circle"
                       size={18}
-                      color="#34C759"
+                      color={GREEN}
                     />
                   )}
                   <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
@@ -1817,7 +1654,7 @@ function RiderDayContent({
                   activeOpacity={0.8}
                 >
                   <View style={styles.incomingRequestLeft}>
-                    <Ionicons name="car" size={14} color="#007AFF" />
+                    <Ionicons name="car" size={14} color={ACCENT} />
                     <Text style={styles.incomingRequestText} numberOfLines={1}>
                       {driverName} wants to drive this ride
                     </Text>
@@ -1829,7 +1666,7 @@ function RiderDayContent({
                     <Ionicons
                       name="chevron-forward"
                       size={13}
-                      color="#007AFF"
+                      color={ACCENT}
                     />
                   </View>
                 </TouchableOpacity>
@@ -1841,754 +1678,3 @@ function RiderDayContent({
     </View>
   );
 }
-
-// ─── Address autocomplete ─────────────────────────────────────────────────────
-
-interface NominatimResult {
-  display_name: string;
-  lat: string;
-  lon: string;
-  address?: Record<string, string>;
-}
-
-function formatSuggestionLabel(item: NominatimResult): string {
-  const addr = item.address ?? {};
-  const street = [addr.house_number, addr.road].filter(Boolean).join(" ");
-  const city = addr.city || addr.town || addr.village || addr.suburb || "";
-  const state = addr.state || "";
-  const parts = [street, city, state].filter(Boolean);
-  return parts.length > 0 ? parts.join(", ") : item.display_name;
-}
-
-function AddressInput({
-  label,
-  value,
-  placeholder,
-  returnKeyType,
-  onChangeText,
-  onSelect,
-}: {
-  label: string;
-  value: string;
-  placeholder?: string;
-  returnKeyType?: "next" | "done";
-  onChangeText: (text: string) => void;
-  onSelect: (address: string, lat: number, lng: number) => void;
-}) {
-  const [suggestions, setSuggestions] = useState<NominatimResult[]>([]);
-  const [fetching, setFetching] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const fetchSuggestions = async (q: string) => {
-    if (q.trim().length < 4) {
-      setSuggestions([]);
-      return;
-    }
-    setFetching(true);
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1`,
-        { headers: { "Accept-Language": "en", "User-Agent": "TandemApp/1.0" } },
-      );
-      const data = await res.json();
-      setSuggestions(Array.isArray(data) ? data : []);
-    } catch {
-      setSuggestions([]);
-    } finally {
-      setFetching(false);
-    }
-  };
-
-  const handleChange = (text: string) => {
-    onChangeText(text);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => fetchSuggestions(text), 400);
-  };
-
-  const handleSelect = (item: NominatimResult) => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    onSelect(
-      formatSuggestionLabel(item),
-      parseFloat(item.lat),
-      parseFloat(item.lon),
-    );
-    setSuggestions([]);
-  };
-
-  return (
-    <View>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <View style={styles.addressInputRow}>
-        <TextInput
-          style={[styles.textInput, styles.addressTextInput]}
-          value={value}
-          onChangeText={handleChange}
-          placeholder={placeholder}
-          placeholderTextColor="#bbb"
-          autoCorrect={false}
-          autoCapitalize="words"
-          returnKeyType={returnKeyType}
-        />
-        {fetching && (
-          <ActivityIndicator
-            size="small"
-            color="#007AFF"
-            style={styles.addressSpinner}
-          />
-        )}
-      </View>
-      {suggestions.length > 0 && (
-        <View style={styles.suggestionsList}>
-          {suggestions.map((item, idx) => (
-            <TouchableOpacity
-              key={idx}
-              style={[
-                styles.suggestionItem,
-                idx === suggestions.length - 1 && styles.suggestionItemLast,
-              ]}
-              onPress={() => handleSelect(item)}
-            >
-              <Ionicons name="location-outline" size={15} color="#007AFF" />
-              <Text style={styles.suggestionText} numberOfLines={2}>
-                {formatSuggestionLabel(item)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
-// ─── Form components ──────────────────────────────────────────────────────────
-
-function DayPicker({
-  selected,
-  onToggle,
-}: {
-  selected: string[];
-  onToggle: (d: string) => void;
-}) {
-  return (
-    <View style={styles.daysRow}>
-      {DAYS.map((d) => (
-        <TouchableOpacity
-          key={d}
-          style={[
-            styles.dayChip,
-            selected.includes(d) && styles.dayChipSelected,
-          ]}
-          onPress={() => onToggle(d)}
-        >
-          <Text
-            style={[
-              styles.dayChipText,
-              selected.includes(d) && styles.dayChipTextSelected,
-            ]}
-          >
-            {d}
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-}
-
-function TimeDropdown({
-  label,
-  value,
-  show,
-  onToggle,
-  onSelect,
-}: {
-  label: string;
-  value: string;
-  show: boolean;
-  onToggle: () => void;
-  onSelect: (t: string) => void;
-}) {
-  return (
-    <>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TouchableOpacity style={styles.dropdown} onPress={onToggle}>
-        <Text style={styles.dropdownText}>{format12h(value)}</Text>
-        <Ionicons name="chevron-down" size={18} color="#666" />
-      </TouchableOpacity>
-      {show && (
-        <ScrollView style={styles.dropdownMenu} nestedScrollEnabled>
-          {TIME_OPTIONS.map((t) => (
-            <TouchableOpacity
-              key={t}
-              style={styles.dropdownItem}
-              onPress={() => onSelect(t)}
-            >
-              <Text style={styles.dropdownItemText}>{format12h(t)}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
-    </>
-  );
-}
-
-function RiderForm({
-  pickup,
-  dropoff,
-  departureTime,
-  setDepartureTime,
-  days,
-  showDepartureDropdown,
-  setShowDepartureDropdown,
-  onToggleDay,
-  onPickupChange,
-  onPickupSelect,
-  onDropoffChange,
-  onDropoffSelect,
-}: {
-  pickup: string;
-  dropoff: string;
-  departureTime: string;
-  setDepartureTime: (v: string) => void;
-  days: string[];
-  showDepartureDropdown: boolean;
-  setShowDepartureDropdown: (v: boolean) => void;
-  onToggleDay: (d: string) => void;
-  onPickupChange: (text: string) => void;
-  onPickupSelect: (address: string, lat: number, lng: number) => void;
-  onDropoffChange: (text: string) => void;
-  onDropoffSelect: (address: string, lat: number, lng: number) => void;
-}) {
-  return (
-    <>
-      <AddressInput
-        label="Pickup Address"
-        value={pickup}
-        returnKeyType="next"
-        placeholder="e.g. 123 Sesame Street, New York"
-        onChangeText={onPickupChange}
-        onSelect={onPickupSelect}
-      />
-      <AddressInput
-        label="Dropoff Address"
-        value={dropoff}
-        returnKeyType="done"
-        placeholder="e.g. 456 Allen Blvd, New York"
-        onChangeText={onDropoffChange}
-        onSelect={onDropoffSelect}
-      />
-      <TimeDropdown
-        label="Departure Time"
-        value={departureTime}
-        show={showDepartureDropdown}
-        onToggle={() => setShowDepartureDropdown(!showDepartureDropdown)}
-        onSelect={(t) => {
-          setDepartureTime(t);
-          setShowDepartureDropdown(false);
-        }}
-      />
-      <Text style={styles.fieldLabel}>Days of the Week</Text>
-      <DayPicker selected={days} onToggle={onToggleDay} />
-    </>
-  );
-}
-
-function DriverForm({
-  days,
-  startTime,
-  setStartTime,
-  endTime,
-  setEndTime,
-  showStartDropdown,
-  setShowStartDropdown,
-  showEndDropdown,
-  setShowEndDropdown,
-  onToggleDay,
-}: {
-  days: string[];
-  startTime: string;
-  setStartTime: (v: string) => void;
-  endTime: string;
-  setEndTime: (v: string) => void;
-  showStartDropdown: boolean;
-  setShowStartDropdown: (v: boolean) => void;
-  showEndDropdown: boolean;
-  setShowEndDropdown: (v: boolean) => void;
-  onToggleDay: (d: string) => void;
-}) {
-  return (
-    <>
-      <Text style={styles.fieldLabel}>Days of the Week</Text>
-      <DayPicker selected={days} onToggle={onToggleDay} />
-      <TimeDropdown
-        label="Available From"
-        value={startTime}
-        show={showStartDropdown}
-        onToggle={() => setShowStartDropdown(!showStartDropdown)}
-        onSelect={(t) => {
-          setStartTime(t);
-          setShowStartDropdown(false);
-        }}
-      />
-      <TimeDropdown
-        label="Available Until"
-        value={endTime}
-        show={showEndDropdown}
-        onToggle={() => setShowEndDropdown(!showEndDropdown)}
-        onSelect={(t) => {
-          setEndTime(t);
-          setShowEndDropdown(false);
-        }}
-      />
-    </>
-  );
-}
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f2f2f7" },
-  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-
-  // ── Header
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 16,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e5ea",
-  },
-  headerTitle: { fontSize: 28, fontWeight: "bold", color: "#1c1c1e" },
-  addButton: {
-    backgroundColor: "#007AFF",
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  // ── List
-  listContent: { padding: 16, paddingBottom: 48 },
-
-  // ── Day accordion
-  daySection: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    marginBottom: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-    overflow: "hidden",
-  },
-  daySectionOpen: {
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  dayHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-  },
-  dayHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
-  dayName: { fontSize: 16, fontWeight: "600", color: "#1c1c1e" },
-  dayNameOpen: { color: "#007AFF" },
-  dotRow: { flexDirection: "row", gap: 5 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  dotGreen: { backgroundColor: "#34C759" },
-  dotBlue: { backgroundColor: "#007AFF" },
-  dayBody: {
-    paddingHorizontal: 18,
-    paddingBottom: 18,
-    borderTopWidth: 1,
-    borderTopColor: "#f2f2f7",
-    paddingTop: 16,
-  },
-
-  // ── Section labels
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#8e8e93",
-    letterSpacing: 0.6,
-    marginBottom: 10,
-  },
-  emptyNote: {
-    fontSize: 13,
-    color: "#aeaeb2",
-    fontStyle: "italic",
-    marginBottom: 4,
-  },
-
-  // ── Availability row (driver)
-  availRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "#f0fdf4",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "#bbf7d0",
-  },
-  availDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#34C759",
-  },
-  availText: { flex: 1, fontSize: 14, fontWeight: "500", color: "#16a34a" },
-  availDelete: { padding: 2 },
-
-  // ── Ride row (driver)
-  rideRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-  },
-  rideRowPending: { backgroundColor: "#fff8f0", borderColor: "#fdd9a0" },
-  rideRowConfirmed: { backgroundColor: "#eff6ff", borderColor: "#bfdbfe" },
-  rideRowLeft: { flex: 1, gap: 2 },
-  rideRowName: { fontSize: 14, fontWeight: "600", color: "#1c1c1e" },
-  rideRowTime: { fontSize: 12, color: "#636366" },
-  rideRowRight: { flexDirection: "row", alignItems: "center", gap: 6 },
-  statusPill: {
-    borderRadius: 20,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-  },
-  pillPending: { backgroundColor: "#FF9500" },
-  pillAwaiting: { backgroundColor: "#8e8e93" },
-  pillConfirmed: { backgroundColor: "#007AFF" },
-  statusPillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-
-  // ── Rider ride card
-  riderRideCard: {
-    backgroundColor: "#f9f9fb",
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#e5e5ea",
-  },
-  riderRideCardConfirmed: {
-    backgroundColor: "#f0fdf4",
-    borderColor: "#bbf7d0",
-  },
-  riderRideCardRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-  },
-  routeViz: { alignItems: "center", marginRight: 12, paddingTop: 2, gap: 3 },
-  routeDotGreen: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#34C759",
-  },
-  routeVizLine: {
-    width: 2,
-    height: 18,
-    backgroundColor: "#d1d1d6",
-    marginVertical: 2,
-  },
-  routeInfo: { flex: 1, gap: 4 },
-  routeAddr: { fontSize: 14, fontWeight: "500", color: "#1c1c1e" },
-  routeTimeBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginVertical: 2,
-  },
-  routeTimeTxt: { fontSize: 12, color: "#8e8e93" },
-  riderRideDelete: { padding: 4, marginLeft: 6 },
-  incomingRequestBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#EFF6FF",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-  },
-  incomingRequestLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    flex: 1,
-  },
-  incomingRequestText: {
-    fontSize: 13,
-    color: "#1d4ed8",
-    fontWeight: "500",
-    flex: 1,
-  },
-  incomingRequestAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-    marginLeft: 8,
-  },
-  incomingRequestActionText: {
-    fontSize: 13,
-    color: "#007AFF",
-    fontWeight: "600",
-  },
-
-  // ── Modals
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "flex-end",
-  },
-  modalSheet: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 24,
-    paddingBottom: 40,
-    paddingTop: 12,
-    maxHeight: "80%",
-  },
-  sheetHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#d1d1d6",
-    alignSelf: "center",
-    marginBottom: 16,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  modalTitle: { fontSize: 22, fontWeight: "bold", color: "#1c1c1e" },
-
-  // ── Ride detail
-  detailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 14,
-  },
-  detailText: { fontSize: 15, color: "#1c1c1e" },
-  actionRow: { flexDirection: "row", gap: 12, marginTop: 20 },
-  denyButton: {
-    flex: 1,
-    backgroundColor: "#FF3B30",
-    borderRadius: 12,
-    padding: 14,
-    alignItems: "center",
-  },
-  acceptButton: {
-    flex: 1,
-    backgroundColor: "#34C759",
-    borderRadius: 12,
-    padding: 14,
-    alignItems: "center",
-  },
-  actionDisabled: { opacity: 0.6 },
-  actionText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  confirmedBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 20,
-    gap: 8,
-  },
-  confirmedText: { fontSize: 16, fontWeight: "600", color: "#34C759" },
-  viewProfileButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    marginTop: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "#007AFF",
-    backgroundColor: "#EFF6FF",
-  },
-  viewProfileText: { fontSize: 15, fontWeight: "600", color: "#007AFF" },
-
-  // ── Form
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#3c3c43",
-    marginBottom: 6,
-    marginTop: 16,
-  },
-  textInput: {
-    backgroundColor: "#f2f2f7",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: "#1c1c1e",
-    borderWidth: 1,
-    borderColor: "#e5e5ea",
-  },
-  addressInputRow: { flexDirection: "row", alignItems: "center" },
-  addressTextInput: { flex: 1 },
-  addressSpinner: { position: "absolute", right: 12 },
-  suggestionsList: {
-    marginTop: 4,
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#e5e5ea",
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  suggestionItem: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f2f2f7",
-  },
-  suggestionItemLast: { borderBottomWidth: 0 },
-  suggestionText: { flex: 1, fontSize: 14, color: "#1c1c1e", lineHeight: 19 },
-  dropdown: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#f2f2f7",
-    borderWidth: 1,
-    borderColor: "#e5e5ea",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  dropdownText: { fontSize: 15, color: "#1c1c1e", flex: 1 },
-  dropdownMenu: {
-    maxHeight: 180,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#e5e5ea",
-    borderRadius: 10,
-    marginTop: 4,
-    overflow: "hidden",
-  },
-  dropdownItem: {
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f2f2f7",
-  },
-  dropdownItemText: { fontSize: 14, color: "#1c1c1e" },
-  daysRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
-  dayChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: "#f2f2f7",
-    borderWidth: 1.5,
-    borderColor: "#e5e5ea",
-  },
-  dayChipSelected: { backgroundColor: "#007AFF", borderColor: "#007AFF" },
-  dayChipText: { fontSize: 13, fontWeight: "600", color: "#636366" },
-  dayChipTextSelected: { color: "#fff" },
-  submitButton: {
-    flexDirection: "row",
-    backgroundColor: "#007AFF",
-    borderRadius: 14,
-    padding: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 28,
-    gap: 8,
-  },
-  submitButtonDisabled: { opacity: 0.55 },
-  submitButtonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-
-  // ── Custom Confirmation Modal
-  confirmOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  confirmBox: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 24,
-    width: "100%",
-    maxWidth: 400,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  confirmTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#1c1c1e",
-    marginBottom: 12,
-    textAlign: "center",
-  },
-  confirmMessage: {
-    fontSize: 16,
-    color: "#636366",
-    marginBottom: 24,
-    textAlign: "center",
-    lineHeight: 22,
-  },
-  confirmButtons: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  confirmButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  confirmKeep: {
-    backgroundColor: "#f2f2f7",
-    borderWidth: 1,
-    borderColor: "#e5e5ea",
-  },
-  confirmKeepText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#007AFF",
-  },
-  confirmCancel: {
-    backgroundColor: "#FF3B30",
-  },
-  confirmCancelText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#fff",
-  },
-});

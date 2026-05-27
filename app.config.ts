@@ -1,0 +1,98 @@
+import { ExpoConfig, ConfigContext } from 'expo/config';
+
+export default ({ config }: ConfigContext): ExpoConfig => ({
+  ...config,
+  name: 'Tandem',
+  slug: 'tandem',
+  version: '1.0.0',
+  orientation: 'portrait',
+  icon: './assets/images/icon.png',
+  scheme: 'tandem',
+  userInterfaceStyle: 'automatic',
+  newArchEnabled: true,
+  ios: {
+    supportsTablet: true,
+    infoPlist: {
+      NSLocationWhenInUseUsageDescription:
+        'Tandem needs your location to show nearby drivers and track your ride.',
+      NSLocationAlwaysAndWhenInUseUsageDescription:
+        'Tandem needs your location in the background to track your active ride.',
+      NSCameraUsageDescription:
+        'Tandem accesses your camera so you can take a profile photo.',
+      NSPhotoLibraryUsageDescription:
+        'Tandem accesses your photos so you can set a profile picture.',
+      ITSAppUsesNonExemptEncryption: false,
+    },
+    bundleIdentifier: 'com.anonymous.tandem',
+  },
+  android: {
+    adaptiveIcon: {
+      backgroundColor: '#F5F5F5',
+      foregroundImage: './assets/images/android-icon-foreground.png',
+    },
+    edgeToEdgeEnabled: true,
+    predictiveBackGestureEnabled: false,
+    permissions: [
+      'android.permission.ACCESS_COARSE_LOCATION',
+      'android.permission.ACCESS_FINE_LOCATION',
+      'android.permission.RECORD_AUDIO',
+    ],
+    package: 'com.anonymous.tandem',
+  },
+  web: {
+    output: 'static',
+    favicon: './assets/images/favicon.png',
+  },
+  plugins: [
+    'expo-router',
+    [
+      'expo-splash-screen',
+      {
+        image: './assets/images/splash-icon.png',
+        imageWidth: 200,
+        resizeMode: 'contain',
+        backgroundColor: '#F5F5F5',
+        dark: {
+          image: './assets/images/splash-icon-dark.png',
+          backgroundColor: '#000000',
+        },
+      },
+    ],
+    [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'Tandem needs your location to show nearby drivers and track your ride.',
+        locationAlwaysAndWhenInUsePermission:
+          'Tandem needs your location in the background to track your active ride.',
+        isAndroidBackgroundLocationEnabled: false,
+      },
+    ],
+    [
+      'expo-image-picker',
+      {
+        photosPermission:
+          'Tandem accesses your photos so you can set a profile picture.',
+        cameraPermission:
+          'Tandem accesses your camera so you can take a profile photo.',
+      },
+    ],
+    [
+      'react-native-maps',
+      {
+        androidGoogleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
+        iosGoogleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
+      },
+    ],
+  ],
+  experiments: {
+    typedRoutes: true,
+    reactCompiler: true,
+  },
+  extra: {
+    router: {},
+    eas: {
+      projectId: '0725a65a-1957-4038-aed2-748491ddbf94',
+    },
+  },
+});

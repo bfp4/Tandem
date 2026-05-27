@@ -1,14 +1,14 @@
+import AddressAutocompleteInput from '@/components/AddressAutocompleteInput';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { collection, doc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { geohashForLocation } from 'geofire-common';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -21,6 +21,8 @@ import {
 } from 'react-native';
 import { auth, db, storage } from '../../config/firebase';
 import { uriToBlob } from '../../utils/uriToBlob';
+import { isValidPhone } from '@/utils/validation';
+import { ACCENT, PLACEHOLDER, RED, TEXT_INVERSE, TEXT_MUTED, TEXT_PRIMARY } from '@/utils/constants';
 
 type Role = 'driver' | 'rider';
 
@@ -30,20 +32,6 @@ interface FieldErrors {
   phone?: string;
   address?: string;
   roles?: string;
-}
-
-interface AddressSuggestion {
-  place_id: number;
-  display_name: string;
-  lat: string;
-  lon: string;
-  type?: string;
-  class?: string;
-}
-
-function isValidPhone(phone: string): boolean {
-  const digits = phone.replace(/\D/g, '');
-  return digits.length >= 10 && digits.length <= 15;
 }
 
 export default function UserDetailsScreen() {
@@ -59,9 +47,6 @@ export default function UserDetailsScreen() {
   const [loading, setLoading] = useState(false);
 
   const [errors, setErrors] = useState<FieldErrors>({});
-  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
-  const [addressLoading, setAddressLoading] = useState(false);
-  const addressDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   const toggleRole = (role: Role) => {
@@ -95,51 +80,6 @@ export default function UserDetailsScreen() {
     return await getDownloadURL(storageRef);
   };
 
-  const onAddressChange = useCallback((text: string) => {
-    setAddress(text);
-    setSelectedCoords(null);
-    if (errors.address) setErrors(prev => ({ ...prev, address: undefined }));
-    setAddressSuggestions([]);
-
-    if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current);
-
-    if (text.trim().length < 3) return;
-
-    addressDebounceRef.current = setTimeout(async () => {
-      setAddressLoading(true);
-      try {
-        const encoded = encodeURIComponent(text.trim());
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&addressdetails=1&limit=8&featuretype=house`,
-          { headers: { 'Accept-Language': 'en', 'User-Agent': 'TandemApp/1.0' } }
-        );
-        const raw: AddressSuggestion[] = await res.json();
-        // Keep only street-level results (houses, buildings, roads)
-        const streetTypes = new Set(['house', 'building', 'residential', 'road', 'street', 'place']);
-        const filtered = raw.filter(r => streetTypes.has(r.type ?? '') || r.class === 'building' || r.class === 'highway');
-        setAddressSuggestions(filtered.length > 0 ? filtered : raw.slice(0, 5));
-      } catch {
-        // silently ignore lookup failures
-      } finally {
-        setAddressLoading(false);
-      }
-    }, 400);
-  }, [errors.address]);
-
-  const selectAddress = (suggestion: AddressSuggestion) => {
-    setAddress(suggestion.display_name);
-    setAddressSuggestions([]);
-    setErrors(prev => ({ ...prev, address: undefined }));
-    const lat = parseFloat(suggestion.lat);
-    const lng = parseFloat(suggestion.lon);
-    if (!isNaN(lat) && !isNaN(lng)) {
-      setSelectedCoords({ lat, lng });
-    }
-  };
-
-  const onAddressManualChange = () => {
-    setSelectedCoords(null);
-  };
 
   const validate = async (): Promise<boolean> => {
     const newErrors: FieldErrors = {};
@@ -270,7 +210,7 @@ export default function UserDetailsScreen() {
               <Image source={{ uri: photoUri }} style={styles.photoPreview} />
             ) : (
               <View style={styles.photoPlaceholder}>
-                <Ionicons name="camera-outline" size={32} color="#999" />
+                <Ionicons name="camera-outline" size={32} color={TEXT_MUTED} />
                 <Text style={styles.photoPlaceholderText}>Add Photo</Text>
               </View>
             )}
@@ -298,7 +238,7 @@ export default function UserDetailsScreen() {
                 if (errors.username) setErrors(prev => ({ ...prev, username: undefined }));
               }}
               autoCapitalize="none"
-              placeholderTextColor="#bbb"
+              placeholderTextColor={PLACEHOLDER}
             />
             {errors.username ? <Text style={styles.errorText}>{errors.username}</Text> : null}
           </View>
@@ -316,7 +256,7 @@ export default function UserDetailsScreen() {
                 setName(t);
                 if (errors.name) setErrors(prev => ({ ...prev, name: undefined }));
               }}
-              placeholderTextColor="#bbb"
+              placeholderTextColor={PLACEHOLDER}
             />
             {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
           </View>
@@ -337,56 +277,33 @@ export default function UserDetailsScreen() {
               }}
               keyboardType="phone-pad"
               inputMode="numeric"
-              placeholderTextColor="#bbb"
+              placeholderTextColor={PLACEHOLDER}
             />
             {errors.phone ? <Text style={styles.errorText}>{errors.phone}</Text> : null}
           </View>
 
-          {/* Address with autocomplete */}
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>
-              Address <Text style={styles.required}>*</Text>
-            </Text>
-            <View>
-              <View style={[styles.addressInputRow, errors.address ? styles.inputError : null]}>
-                <TextInput
-                  style={styles.addressInput}
-                  placeholder="e.g. 123 Main St, City, State"
-                  value={address}
-                  onChangeText={onAddressChange}
-                  placeholderTextColor="#bbb"
-                />
-                {addressLoading && (
-                  <ActivityIndicator size="small" color="#007AFF" style={styles.addressSpinner} />
-                )}
-              </View>
-              {addressSuggestions.length > 0 && (
-                <View style={styles.suggestionsContainer}>
-                  <FlatList
-                    data={addressSuggestions}
-                    keyExtractor={item => String(item.place_id)}
-                    keyboardShouldPersistTaps="handled"
-                    scrollEnabled={false}
-                    renderItem={({ item, index }) => (
-                      <TouchableOpacity
-                        style={[
-                          styles.suggestionItem,
-                          index < addressSuggestions.length - 1 && styles.suggestionItemBorder,
-                        ]}
-                        onPress={() => selectAddress(item)}
-                      >
-                        <Ionicons name="location-outline" size={14} color="#888" style={styles.suggestionIcon} />
-                        <Text style={styles.suggestionText} numberOfLines={2}>
-                          {item.display_name}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  />
-                </View>
-              )}
-            </View>
-            {errors.address ? <Text style={styles.errorText}>{errors.address}</Text> : null}
-          </View>
+          <AddressAutocompleteInput
+            label="Address"
+            required
+            value={address}
+            placeholder="e.g. 123 Main St, City, State"
+            minQueryLength={3}
+            selectionLabel="full"
+            streetLevelOnly
+            error={errors.address}
+            onChangeText={(text) => {
+              setAddress(text);
+              setSelectedCoords(null);
+              if (errors.address) setErrors((prev) => ({ ...prev, address: undefined }));
+            }}
+            onSelect={(addr, lat, lng) => {
+              setAddress(addr);
+              if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+                setSelectedCoords({ lat, lng });
+              }
+              setErrors((prev) => ({ ...prev, address: undefined }));
+            }}
+          />
 
           {/* Bio (optional) */}
           <View style={styles.fieldGroup}>
@@ -399,7 +316,7 @@ export default function UserDetailsScreen() {
               multiline
               numberOfLines={4}
               textAlignVertical="top"
-              placeholderTextColor="#bbb"
+              placeholderTextColor={PLACEHOLDER}
             />
           </View>
 
@@ -433,7 +350,7 @@ export default function UserDetailsScreen() {
                 <Text style={styles.roleDescription}>Request rides</Text>
                 {roles.includes('rider') && (
                   <View style={styles.roleCheck}>
-                    <Ionicons name="checkmark-circle" size={20} color="#007AFF" />
+                    <Ionicons name="checkmark-circle" size={20} color={ACCENT} />
                   </View>
                 )}
               </TouchableOpacity>
@@ -461,7 +378,7 @@ export default function UserDetailsScreen() {
                 <Text style={styles.roleDescription}>Offer rides</Text>
                 {roles.includes('driver') && (
                   <View style={styles.roleCheck}>
-                    <Ionicons name="checkmark-circle" size={20} color="#007AFF" />
+                    <Ionicons name="checkmark-circle" size={20} color={ACCENT} />
                   </View>
                 )}
               </TouchableOpacity>
@@ -476,7 +393,7 @@ export default function UserDetailsScreen() {
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={TEXT_INVERSE} />
           ) : (
             <Text style={styles.continueButtonText}>
               {roles.includes('driver') ? 'Continue' : 'Get Started'}
@@ -487,7 +404,6 @@ export default function UserDetailsScreen() {
     </KeyboardAvoidingView>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -504,7 +420,7 @@ const styles = StyleSheet.create({
   stepLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#007AFF',
+    color: ACCENT,
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 8,
@@ -548,11 +464,11 @@ const styles = StyleSheet.create({
   },
   photoPlaceholderText: {
     fontSize: 11,
-    color: '#999',
+    color: TEXT_MUTED,
     marginTop: 4,
   },
   changePhotoText: {
-    color: '#007AFF',
+    color: ACCENT,
     fontSize: 14,
     fontWeight: '500',
   },
@@ -565,11 +481,11 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: TEXT_PRIMARY,
     marginBottom: 8,
   },
   required: {
-    color: '#FF3B30',
+    color: RED,
   },
   optional: {
     color: '#aaa',
@@ -589,7 +505,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   errorText: {
-    color: '#FF3B30',
+    color: RED,
     fontSize: 12,
     marginTop: 5,
     marginLeft: 2,
@@ -597,57 +513,6 @@ const styles = StyleSheet.create({
   bioInput: {
     height: 100,
     paddingTop: 14,
-  },
-  addressInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f7f7f7',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ebebeb',
-    paddingHorizontal: 14,
-  },
-  addressInput: {
-    flex: 1,
-    paddingVertical: 14,
-    fontSize: 15,
-    color: '#111',
-  },
-  addressSpinner: {
-    marginLeft: 8,
-  },
-  suggestionsContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    marginTop: 4,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  suggestionItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-  },
-  suggestionItemBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  suggestionIcon: {
-    marginRight: 8,
-    marginTop: 2,
-  },
-  suggestionText: {
-    flex: 1,
-    fontSize: 13,
-    color: '#333',
-    lineHeight: 18,
   },
   roleHint: {
     fontSize: 12,
@@ -683,12 +548,12 @@ const styles = StyleSheet.create({
   roleLabel: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#333',
+    color: TEXT_PRIMARY,
     marginTop: 8,
     marginBottom: 2,
   },
   roleLabelSelected: {
-    color: '#007AFF',
+    color: ACCENT,
   },
   roleDescription: {
     fontSize: 12,
@@ -710,8 +575,9 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   continueButtonText: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontSize: 17,
     fontWeight: '700',
   },
 });
+

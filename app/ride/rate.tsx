@@ -14,16 +14,18 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-
-const ACCENT = '#007AFF';
-const GREEN = '#34C759';
-const STAR_COLOR = '#FFB800';
-const STAR_EMPTY = '#D1D5DB';
-const TEXT_PRIMARY = '#1C1C1E';
-const TEXT_SECONDARY = '#6B7280';
-const TEXT_MUTED = '#9CA3AF';
-const BG = '#F2F2F7';
-const CARD_BG = '#FFFFFF';
+import {
+  ACCENT,
+  BG,
+  CARD_BG,
+  GREEN,
+  STAR_COLOR,
+  STAR_EMPTY,
+  TEXT_INVERSE,
+  TEXT_MUTED,
+  TEXT_PRIMARY,
+  TEXT_SECONDARY,
+} from '@/utils/constants';
 
 export default function RateRideScreen() {
   const { rideRequestId, otherUserId, otherUserName } = useLocalSearchParams<{
@@ -76,7 +78,7 @@ export default function RateRideScreen() {
       <View style={styles.content}>
         <View style={styles.header}>
           <View style={styles.checkCircle}>
-            <Ionicons name="checkmark" size={36} color="#fff" />
+            <Ionicons name="checkmark" size={36} color={TEXT_INVERSE} />
           </View>
           <Text style={styles.title}>Ride Complete</Text>
           <Text style={styles.subtitle}>
@@ -121,7 +123,7 @@ export default function RateRideScreen() {
             disabled={submitting}
           >
             {submitting ? (
-              <ActivityIndicator color="#fff" size="small" />
+              <ActivityIndicator color={TEXT_INVERSE} size="small" />
             ) : (
               <Text style={styles.submitButtonText}>Submit Rating</Text>
             )}
@@ -233,7 +235,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   submitButtonText: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontSize: 17,
     fontWeight: '700',
   },

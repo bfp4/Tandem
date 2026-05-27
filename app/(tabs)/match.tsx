@@ -1,33 +1,39 @@
+import ScreenHeader from "@/components/ScreenHeader";
+import StarRating from "@/components/StarRating";
+import Avatar from "@/components/Avatar";
+import EmptyState from "@/components/EmptyState";
+import LoadingScreen from "@/components/LoadingScreen";
 import { useAuth } from "@/context/AuthContext";
 import { getMatchedUsers, type MatchResult } from "@/services/matchingService";
 import { getUser } from "@/services/userService";
 import type { User } from "@/types";
 import { normalizeProfilePhotoUrl } from "@/utils/profilePhoto";
+import {
+  ACCENT,
+  DISTANCE_STEPS,
+  GREEN,
+  parseStarRating,
+  STAR_COLOR,
+  TEXT_MUTED,
+  TEXT_PRIMARY,
+  TEXT_TERTIARY,
+} from "@/utils/constants";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { Image } from "expo-image";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Modal,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { styles } from "./match.styles";
 
-const DISTANCE_STEPS = [5, 10, 15, 25, 50, 100];
-
-/** Aggregate fields may be missing or non-numeric in Firestore snapshots. */
-function toStarRatingNumber(value: unknown): number {
-  const n = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
 
 function toRideCountNumber(value: unknown): number {
   const n = typeof value === "number" ? value : Number(value);
@@ -140,7 +146,7 @@ export default function MatchScreen() {
 
     if (selectedRating !== null) {
       filtered = filtered.filter(
-        (r) => toStarRatingNumber(r.user.starRating) >= selectedRating,
+        (r) => parseStarRating(r.user.starRating) >= selectedRating,
       );
     }
 
@@ -158,7 +164,7 @@ export default function MatchScreen() {
       params: {
         id: result.user.uid,
         name: result.user.name,
-        rating: String(toStarRatingNumber(result.user.starRating)),
+        rating: String(parseStarRating(result.user.starRating)),
         totalRides: String(toRideCountNumber(result.user.rideCount)),
         bio: result.user.bio ?? "",
         profilePhoto: normalizeProfilePhotoUrl(result.user.profilePhoto),
@@ -175,38 +181,29 @@ export default function MatchScreen() {
     return (
       <View style={styles.matchCard}>
         <View style={styles.matchHeader}>
-          <View style={styles.avatar}>
-            {matchPhotoUrl ? (
-              <Image
-                source={{ uri: matchPhotoUrl }}
-                style={styles.avatarImage}
-                contentFit="cover"
-                transition={200}
-              />
-            ) : (
-              <Ionicons name="person" size={32} color="#999" />
-            )}
-          </View>
+          <Avatar uri={matchPhotoUrl} size={52} style={{ marginRight: 12 }} />
           <View style={styles.matchInfo}>
             <Text style={styles.matchName}>{item.user.name}</Text>
             <View style={styles.ratingRow}>
-              <Ionicons name="star" size={14} color="#FFB800" />
-              <Text style={styles.rating}>
-                {toStarRatingNumber(item.user.starRating).toFixed(1)}
-              </Text>
+              <StarRating
+                rating={parseStarRating(item.user.starRating)}
+                size={14}
+                showValue
+                filledColor={STAR_COLOR}
+              />
               <Text style={styles.rideCount}>
                 ({toRideCountNumber(item.user.rideCount)} rides)
               </Text>
             </View>
             <View style={styles.detailRow}>
-              <Ionicons name="location" size={12} color="#666" />
+              <Ionicons name="location" size={12} color={TEXT_TERTIARY} />
               <Text style={styles.detailText}>
                 {item.distanceMiles < 0.1
                   ? "Nearby"
                   : `${item.distanceMiles.toFixed(1)} mi away`}
               </Text>
               <Text style={styles.separator}>·</Text>
-              <Ionicons name="calendar" size={12} color="#666" />
+              <Ionicons name="calendar" size={12} color={TEXT_TERTIARY} />
               <Text style={styles.detailText}>
                 {item.matchingRides.length} matching ride
                 {item.matchingRides.length !== 1 ? "s" : ""}
@@ -233,7 +230,7 @@ export default function MatchScreen() {
             onPress={() => handleViewMore(item)}
           >
             <Text style={styles.viewMoreButtonText}>View More</Text>
-            <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+            <Ionicons name="chevron-forward" size={20} color={ACCENT} />
           </TouchableOpacity>
         </View>
       </View>
@@ -246,36 +243,38 @@ export default function MatchScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Find {roleLookingFor}</Text>
-        {hasLocation ? (
-          <View style={styles.locationBadge}>
-            <Ionicons name="navigate" size={12} color="#34C759" />
-            <Text style={styles.locationBadgeText}>Using your location</Text>
-          </View>
-        ) : (
-          <View style={styles.locationBadge}>
-            <Ionicons name="navigate-outline" size={12} color="#999" />
-            <Text style={[styles.locationBadgeText, { color: "#999" }]}>
-              Location unavailable — showing all
-            </Text>
-          </View>
-        )}
-      </View>
+      <ScreenHeader
+        title={`Find ${roleLookingFor}`}
+        subtitle={
+          hasLocation ? (
+            <View style={styles.locationBadge}>
+              <Ionicons name="navigate" size={12} color={GREEN} />
+              <Text style={styles.locationBadgeText}>Using your location</Text>
+            </View>
+          ) : (
+            <View style={styles.locationBadge}>
+              <Ionicons name="navigate-outline" size={12} color={TEXT_MUTED} />
+              <Text style={[styles.locationBadgeText, { color: TEXT_MUTED }]}>
+                Location unavailable — showing all
+              </Text>
+            </View>
+          )
+        }
+      />
 
       <View style={styles.searchSection}>
         <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color="#999" />
+          <Ionicons name="search" size={20} color={TEXT_MUTED} />
           <TextInput
             style={styles.searchInput}
             placeholder={`Search ${roleLookingFor.toLowerCase()}...`}
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholderTextColor="#999"
+            placeholderTextColor={TEXT_MUTED}
           />
           {searchQuery ? (
             <TouchableOpacity onPress={() => setSearchQuery("")}>
-              <Ionicons name="close-circle" size={20} color="#999" />
+              <Ionicons name="close-circle" size={20} color={TEXT_MUTED} />
             </TouchableOpacity>
           ) : null}
         </View>
@@ -296,18 +295,13 @@ export default function MatchScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>Finding matches near you...</Text>
-        </View>
+        <LoadingScreen message="Finding matches near you..." />
       ) : filteredResults.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="people-outline" size={64} color="#ccc" />
-          <Text style={styles.emptyText}>No matches found</Text>
-          <Text style={styles.emptySubtext}>
-            Try increasing the distance filter or check back later
-          </Text>
-        </View>
+        <EmptyState
+          icon="people-outline"
+          title="No matches found"
+          subtitle="Try increasing the distance filter or check back later"
+        />
       ) : (
         <FlatList
           data={filteredResults}
@@ -330,7 +324,7 @@ export default function MatchScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Filters</Text>
               <TouchableOpacity onPress={() => setShowFilters(false)}>
-                <Ionicons name="close" size={28} color="#333" />
+                <Ionicons name="close" size={28} color={TEXT_PRIMARY} />
               </TouchableOpacity>
             </View>
 
@@ -422,307 +416,3 @@ export default function MatchScreen() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
-  header: {
-    padding: 16,
-    paddingTop: 60,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#333",
-  },
-  locationBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 4,
-    gap: 4,
-  },
-  locationBadgeText: {
-    fontSize: 12,
-    color: "#34C759",
-    fontWeight: "500",
-  },
-  searchSection: {
-    flexDirection: "row",
-    padding: 16,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
-    gap: 8,
-  },
-  searchBar: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f5f5f5",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 44,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    marginLeft: 8,
-    color: "#333",
-  },
-  filterIconButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "#f0f7ff",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  filterActiveButton: {
-    backgroundColor: "#007AFF",
-  },
-  centered: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 12,
-  },
-  loadingText: {
-    fontSize: 15,
-    color: "#999",
-  },
-  listContent: {
-    padding: 16,
-  },
-  matchCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  matchHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 10,
-  },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "#f0f0f0",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-    overflow: "hidden",
-  },
-  avatarImage: {
-    width: "100%",
-    height: "100%",
-  },
-  matchInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  matchName: {
-    fontSize: 17,
-    fontWeight: "600",
-    color: "#333",
-    marginBottom: 4,
-  },
-  ratingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-    flexWrap: "wrap",
-    alignSelf: "flex-start",
-  },
-  rating: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#333",
-    marginLeft: 4,
-    flexShrink: 0,
-  },
-  rideCount: {
-    fontSize: 12,
-    color: "#999",
-    marginLeft: 4,
-    flexShrink: 0,
-  },
-  detailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  detailText: {
-    fontSize: 12,
-    color: "#666",
-  },
-  separator: {
-    fontSize: 12,
-    color: "#ccc",
-    marginHorizontal: 2,
-  },
-  scoreContainer: {
-    alignItems: "center",
-    backgroundColor: "#f0f7ff",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginLeft: 8,
-  },
-  scoreValue: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#007AFF",
-  },
-  scoreLabel: {
-    fontSize: 10,
-    color: "#007AFF",
-    fontWeight: "500",
-  },
-  bio: {
-    fontSize: 14,
-    color: "#666",
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-  cardActions: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  viewMoreButton: {
-    flex: 1,
-    flexDirection: "row",
-    backgroundColor: "#f0f7ff",
-    borderRadius: 12,
-    padding: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#007AFF",
-  },
-  viewMoreButtonText: {
-    color: "#007AFF",
-    fontSize: 14,
-    fontWeight: "600",
-    marginRight: 4,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 32,
-  },
-  emptyText: {
-    fontSize: 20,
-    fontWeight: "600",
-    color: "#999",
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: "#aaa",
-    textAlign: "center",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
-  },
-  modalContent: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 20,
-    maxHeight: "80%",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 24,
-  },
-  modalTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#333",
-  },
-  filterSection: {
-    marginBottom: 24,
-  },
-  filterLabel: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#333",
-    marginBottom: 12,
-  },
-  filterValue: {
-    color: "#007AFF",
-  },
-  distanceChips: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  ratingFilters: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  filterChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f5f5f5",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-    gap: 4,
-  },
-  filterChipActive: {
-    backgroundColor: "#007AFF",
-    borderColor: "#007AFF",
-  },
-  filterChipText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#333",
-  },
-  filterChipTextActive: {
-    color: "#fff",
-  },
-  clearFiltersButton: {
-    padding: 12,
-    alignItems: "center",
-  },
-  clearFiltersText: {
-    fontSize: 14,
-    color: "#FF3B30",
-    fontWeight: "600",
-  },
-  applyButton: {
-    backgroundColor: "#007AFF",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  applyButtonText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-  },
-});

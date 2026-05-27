@@ -9,6 +9,24 @@ import { getUser } from '@/services/userService';
 import type { RideConfirmation } from '@/types/rideConfirmation';
 import type { User as AppUser } from '@/types/user';
 import { reverseGeocode } from '@/utils/geocoding';
+import {
+  ACCENT,
+  ARRIVAL_THRESHOLD_METERS,
+  CARD_BG,
+  GREEN,
+  RED,
+  ROUTE_REFRESH_DISTANCE_METERS,
+  TEXT_INVERSE,
+  TEXT_MUTED,
+  TEXT_PRIMARY,
+  TEXT_SECONDARY,
+} from '@/utils/constants';
+import {
+  formatDistance,
+  formatDurationFromSeconds,
+  formatStepDistance,
+} from '@/utils/distanceFormat';
+import { geoPointToLatLng, haversineMeters } from '@/utils/geo';
 import { fetchRouteWithSteps, getManeuverIcon, type RouteStep } from '@/utils/routing';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -26,62 +44,6 @@ import {
   View,
 } from 'react-native';
 import MapView, { type MarkerData, type RouteData } from '../../components/Map';
-
-const ACCENT = '#007AFF';
-const GREEN = '#34C759';
-const RED = '#FF3B30';
-const TEXT_PRIMARY = '#1C1C1E';
-const TEXT_SECONDARY = '#6B7280';
-const TEXT_MUTED = '#9CA3AF';
-const CARD_BG = '#FFFFFF';
-
-const ARRIVAL_THRESHOLD_METERS = 150;
-const ROUTE_REFRESH_DISTANCE_METERS = 500;
-
-function haversineMeters(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const R = 6371e3;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function geoPointToLatLng(gp: any): { latitude: number; longitude: number } | null {
-  if (!gp) return null;
-  const lat = gp.latitude ?? gp._lat;
-  const lng = gp.longitude ?? gp._long ?? gp._lng;
-  if (typeof lat !== 'number' || typeof lng !== 'number') return null;
-  return { latitude: lat, longitude: lng };
-}
-
-function formatDistance(meters: number): string {
-  if (meters < 1000) return `${Math.round(meters)} m`;
-  const miles = meters / 1609.34;
-  return `${miles.toFixed(1)} mi`;
-}
-
-function formatDuration(seconds: number): string {
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  if (minutes < 60) return `${minutes} min`;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
-}
-
-function formatStepDistance(meters: number): string {
-  if (meters < 30) return '';
-  if (meters < 1000) return `${Math.round(meters / 10) * 10} m`;
-  const miles = meters / 1609.34;
-  return `${miles.toFixed(1)} mi`;
-}
 
 export default function RideScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -465,7 +427,7 @@ export default function RideScreen() {
             <Ionicons
               name={getManeuverIcon(nextStep.maneuverType, nextStep.maneuverModifier) as any}
               size={28}
-              color="#fff"
+              color={TEXT_INVERSE}
             />
             <View style={styles.directionTextContainer}>
               <Text style={styles.directionInstruction} numberOfLines={2}>
@@ -483,7 +445,7 @@ export default function RideScreen() {
         <View style={styles.overlay} pointerEvents="box-none">
         {hasArrived && isDriver && (
           <View style={styles.arrivedBanner}>
-            <Ionicons name="checkmark-circle" size={22} color="#fff" />
+            <Ionicons name="checkmark-circle" size={22} color={TEXT_INVERSE} />
             <Text style={styles.arrivedText}>You've arrived at the destination!</Text>
           </View>
         )}
@@ -524,8 +486,8 @@ export default function RideScreen() {
                   <Ionicons name="time-outline" size={18} color={ACCENT} />
                   <Text style={styles.statValue}>
                     {displayDuration != null
-                      ? formatDuration(displayDuration)
-                      : formatDuration(displayDistance / 13.4)}
+                      ? formatDurationFromSeconds(displayDuration)
+                      : formatDurationFromSeconds(displayDistance / 13.4)}
                   </Text>
                   <Text style={styles.statLabel}>ETA</Text>
                 </View>
@@ -607,13 +569,13 @@ export default function RideScreen() {
                 disabled={completing || cancelling}
               >
                 {completing ? (
-                  <ActivityIndicator color="#fff" size="small" />
+                  <ActivityIndicator color={TEXT_INVERSE} size="small" />
                 ) : (
                   <>
                     <Ionicons
                       name={hasArrived ? 'checkmark-circle' : 'flag'}
                       size={20}
-                      color="#fff"
+                      color={TEXT_INVERSE}
                     />
                     <Text style={styles.completeButtonText}>
                       {hasArrived ? "You've Arrived — Complete Ride" : 'Complete Ride'}
@@ -689,7 +651,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   backButtonText: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontWeight: '600',
     fontSize: 15,
   },
@@ -729,7 +691,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   directionInstruction: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontSize: 17,
     fontWeight: '700',
     lineHeight: 22,
@@ -762,7 +724,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   arrivedText: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontSize: 15,
     fontWeight: '700',
   },
@@ -887,7 +849,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   completeButtonText: {
-    color: '#fff',
+    color: TEXT_INVERSE,
     fontSize: 16,
     fontWeight: '700',
   },
