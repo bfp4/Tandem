@@ -36,6 +36,10 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# compiled TypeScript output
+types/*.js
+types/*.js.map
+
 app-example
 
 # generated native folders
